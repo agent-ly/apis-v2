@@ -1,0 +1,22 @@
+{
+  "name": "@swc/esm",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./loader": "./src/loader.js"
+  },
+  "bin": {
+    "swc-esm": "./src/bin.js"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.3.0"
+  },
+  "peerDependencies": {
+    "@swc/core": "^1.3.0"
+  },
+  "dependencies": {
+    "chokidar": "^3.5.3",
+    "kleur": "^4.1.5",
+    "mri": "^1.2.0"
+  }
+}

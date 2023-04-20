@@ -1,0 +1,9 @@
+{
+  "name": "roblox-util",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./pagination": "./src/pagination.js",
+    "./roblosecurity": "./src/roblosecurity.js"
+  }
+}

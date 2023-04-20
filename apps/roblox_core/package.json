@@ -1,0 +1,19 @@
+{
+  "name": "roblox-core",
+  "type": "module",
+  "scripts": {
+    "build": "swc src -d dist",
+    "dev": "swc-esm -w \"src/**/*.ts\" -E src/main.ts",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@nestjs/config": "^2.3.1",
+    "@nestjs/platform-fastify": "^9.3.12",
+    "@swc/esm": "workspace:^",
+    "errd": "^1.0.0",
+    "node-ipinfo": "^3.4.0",
+    "roblox-proxy-core": "workspace:^",
+    "roblox-proxy-nestjs": "workspace:^",
+    "roblox-util": "workspace:^"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "module": { "type": "nodenext" },
+  "jsc": {
+    "target": "esnext",
+    "parser": { "syntax": "typescript" },
+    "externalHelpers": true
+  }
+}

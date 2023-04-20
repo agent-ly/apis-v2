@@ -1,0 +1,20 @@
+{
+  "name": "roblox-proxy-core",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./client": "./dist/client/mod.js",
+    "./sessions": "./dist/sessions.js",
+    "./types": "./dist/types.js"
+  },
+  "scripts": {
+    "build:clean": "rm -rf dist",
+    "build:compile": "tsc -p tsconfig.build.json",
+    "build": "npm run build:clean && npm run build:compile"
+  },
+  "dependencies": {
+    "https-proxy-agent": "^5.0.1",
+    "nhttp-land": "^1.2.9",
+    "node-fetch": "^3.3.1"
+  }
+}

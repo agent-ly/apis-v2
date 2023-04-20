@@ -1,0 +1,39 @@
+{
+  "name": "main",
+  "type": "module",
+  "scripts": {
+    "build": "swc src -d dist",
+    "start": "swc-esm src/main.ts",
+    "start:prod": "node dist/main.js",
+    "dev": "swc-esm -w \"src/**/*.ts\" -E src/main.ts",
+    "test": "vitest run",
+    "test:dev": "vitest dev"
+  },
+  "dependencies": {
+    "@nestjs/config": "^2.3.1",
+    "@nestjs/event-emitter": "^1.4.1",
+    "@nestjs/jwt": "^10.0.2",
+    "@nestjs/mapped-types": "*",
+    "@nestjs/microservices": "^9.3.12",
+    "@nestjs/platform-fastify": "^9.3.12",
+    "@nestjs/platform-socket.io": "^9.3.12",
+    "@nestjs/swagger": "^6.2.1",
+    "@nestjs/testing": "^9.4.0",
+    "@nestjs/websockets": "^9.3.12",
+    "@swc/esm": "workspace:^",
+    "@swc/unplugin": "workspace:^",
+    "argon2": "^0.30.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.0",
+    "fastify": "^4.15.0",
+    "mongodb": "^5.1.0",
+    "mongodb-super-util": "^1.0.0",
+    "nanoid": "^4.0.2",
+    "nestjs-super-mongodb": "^1.0.0",
+    "nestjs-super-redis": "^1.0.6",
+    "otpauth": "^9.1.1",
+    "pactum": "^3.3.3",
+    "redis": "^4.6.5",
+    "vitest": "^0.30.1"
+  }
+}

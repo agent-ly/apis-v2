@@ -1,0 +1,19 @@
+{
+  "name": "roblox-proxy-nestjs",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./dist/mod.js",
+    "./apis/*": "./dist/apis/*.js"
+  },
+  "scripts": {
+    "build:clean": "rm -rf dist",
+    "build:compile": "tsc -p tsconfig.build.json",
+    "build": "npm run build:clean && npm run build:compile"
+  },
+  "dependencies": {
+    "destr": "^1.2.2",
+    "roblox-proxy-core": "workspace:^",
+    "roblox-util": "workspace:^"
+  }
+}
