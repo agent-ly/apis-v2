@@ -4,12 +4,12 @@ import {
   NotFoundException,
   BadRequestException,
 } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { InjectCollection } from "nestjs-super-mongodb";
 import type { Collection } from "mongodb";
-import { InjectQueue } from "@nestjs/bullmq";
-import type { Queue } from "bullmq";
-import { nanoid } from "nanoid";
 
+import { nanoid } from "../../common/nanoid.util.js";
+import { CryptService } from "../../crypt/crypt.service.js";
 import { SingleTradeStatus } from "../single_trade/single_trade.entity.js";
 import { SingleTradeService } from "../single_trade/single_trade.service.js";
 import {
@@ -18,11 +18,11 @@ import {
   MultiTradeStatus,
   MultiTradeStep,
 } from "./multi_trade.entity.js";
-import type {
-  AddMultiTradePayload,
-  MultiTradeJobData,
-} from "./multi_trade.interfaces.js";
-import { COLLECTION_NAME, QUEUE_NAME } from "./multi_trade.constants.js";
+import type { AddMultiTradePayload } from "./multi_trade.interfaces.js";
+import {
+  COLLECTION_NAME,
+  MULTI_TRADE_ADDED_EVENT,
+} from "./multi_trade.constants.js";
 
 @Injectable()
 export class MultiTradeService {
@@ -31,17 +31,46 @@ export class MultiTradeService {
   constructor(
     @InjectCollection(COLLECTION_NAME)
     private readonly collection: Collection<SerializedMultiTrade>,
-    @InjectQueue(QUEUE_NAME) private readonly queue: Queue<MultiTradeJobData>,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly cryptService: CryptService,
     private readonly singleTradeService: SingleTradeService
   ) {}
 
-  async findByStatus(
-    multiTradeStatus: MultiTradeStatus
-  ): Promise<MultiTrade[]> {
-    const multiTrades = await this.collection
-      .find({ status: multiTradeStatus })
-      .toArray();
-    return multiTrades.map((multiTrade) => this.deserialize(multiTrade));
+  prepare(payload: AddMultiTradePayload): MultiTrade {
+    const id = nanoid(8);
+    const now = new Date();
+    const multiTrade: MultiTrade = {
+      _id: id,
+      status: MultiTradeStatus.Pending,
+      step: MultiTradeStep.None,
+      users: new Map(payload.users),
+      userAssetIds: new Map(payload.userAssetIds),
+      recyclableUserAssetIds: new Map(payload.recyclableUserAssetIds),
+      children: payload.children,
+      current: null,
+      error: null,
+      startedAt: null,
+      processedAt: null,
+      acknowledgedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    return multiTrade;
+  }
+
+  async add(multiTrade: MultiTrade): Promise<MultiTrade> {
+    await this.collection.insertOne(this.serialize(multiTrade));
+    this.eventEmitter.emit(MULTI_TRADE_ADDED_EVENT, multiTrade);
+    this.logger.debug(`Added Multi-Trade ${multiTrade._id}.`);
+    return multiTrade;
+  }
+
+  async save(multiTrade: MultiTrade): Promise<void> {
+    multiTrade.updatedAt = new Date();
+    await this.collection.updateOne(
+      { _id: multiTrade._id },
+      { $set: this.serialize(multiTrade) }
+    );
   }
 
   async findById(multiTradeId: string): Promise<MultiTrade | null> {
@@ -58,43 +87,6 @@ export class MultiTradeService {
       throw new NotFoundException(`Multi-Trade ${multiTradeId} not found.`);
     }
     return multiTrade;
-  }
-
-  async add(payload: AddMultiTradePayload): Promise<MultiTrade> {
-    const id = nanoid(8);
-    const now = new Date();
-    const multiTrade: MultiTrade = {
-      _id: id,
-      status: MultiTradeStatus.Pending,
-      step: MultiTradeStep.None,
-      currentJobIndex: null,
-      jobs: payload.jobs,
-      credentials: new Map(payload.credentials),
-      userAssetIds: new Map(payload.userAssetIds),
-      recyclableUserAssetIds: new Map(payload.recyclableUserAssetIds),
-      error: null,
-      startedAt: null,
-      processedAt: null,
-      acknowledgedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await this.collection.insertOne(this.serialize(multiTrade));
-    await this.queue.add(
-      "process",
-      { multiTradeId: id },
-      { jobId: `mtid_${id}` }
-    );
-    this.logger.debug(`Added Multi-Trade ${id}.`);
-    return multiTrade;
-  }
-
-  async save(multiTrade: MultiTrade): Promise<void> {
-    multiTrade.updatedAt = new Date();
-    await this.collection.updateOne(
-      { _id: multiTrade._id },
-      { $set: this.serialize(multiTrade) }
-    );
   }
 
   async acknowledge(multiTradeId: string): Promise<void> {
@@ -201,36 +193,33 @@ export class MultiTradeService {
     this.logger.debug(`Pruned ${deletedCount} Multi-Trade(s).`);
   }
 
-  async drainQueue(): Promise<void> {
-    await this.singleTradeService.drainQueue();
-    await this.queue.drain();
-  }
-
-  async pauseQueue(): Promise<void> {
-    await this.singleTradeService.pauseQueue();
-    await this.queue.pause();
-  }
-
   async destroy() {
     await this.singleTradeService.destroy();
-    await this.queue.obliterate({ force: true });
     await this.collection.deleteMany({});
   }
 
-  serialize(multiTrade: MultiTrade): SerializedMultiTrade {
+  private serialize(multiTrade: MultiTrade): SerializedMultiTrade {
     return {
       ...multiTrade,
-      credentials: multiTrade.credentials ? [...multiTrade.credentials] : null,
+      users: multiTrade.users
+        ? this.cryptService.encrypt(
+            this.cryptService.encode([...multiTrade.users])
+          )
+        : null,
       userAssetIds: [...multiTrade.userAssetIds],
       recyclableUserAssetIds: [...multiTrade.recyclableUserAssetIds],
     };
   }
 
-  deserialize(multiTrade: SerializedMultiTrade): MultiTrade {
+  private deserialize(multiTrade: SerializedMultiTrade): MultiTrade {
     return {
       ...multiTrade,
-      credentials: multiTrade.credentials
-        ? new Map(multiTrade.credentials)
+      users: multiTrade.users
+        ? new Map(
+            this.cryptService.decode(
+              this.cryptService.decrypt(multiTrade.users)
+            )
+          )
         : null,
       userAssetIds: new Map(multiTrade.userAssetIds),
       recyclableUserAssetIds: new Map(multiTrade.recyclableUserAssetIds),

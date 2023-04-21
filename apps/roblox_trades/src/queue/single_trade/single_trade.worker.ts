@@ -1,110 +1,124 @@
-import { Logger } from "@nestjs/common";
-import { WorkerHost, Processor } from "@nestjs/bullmq";
-import { DelayedError, type Job } from "bullmq";
-import type { NormalizedRobloxApiError } from "roblox-proxy-nestjs";
+import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
+import { RobloxError, RobloxErrorHost } from "roblox-proxy-nestjs";
 import type { TradeOfferPayload } from "roblox-proxy-nestjs/apis/trades.api";
 
-import { CryptService } from "../../crypt/crypt.service.js";
 import {
   type SingleTrade,
   SingleTradeStatus,
   SingleTradeStep,
   SingleTradeDepth,
 } from "./single_trade.entity.js";
-import type { SingleTradeJobData } from "./single_trade.interfaces.js";
-import { QUEUE_NAME } from "./single_trade.constants.js";
+import type { SingleTradeChallengeEvent } from "./single_trade.interfaces.js";
 import { SingleTradeHandler } from "./single_trade.handler.js";
 import { SingleTradeService } from "./single_trade.service.js";
+import {
+  SINGLE_TRADE_CHALLENGE_EVENT,
+  SINGLE_TRADE_UPDATED_EVENT,
+} from "./single_trade.constants.js";
 
-@Processor(QUEUE_NAME)
-export class SingleTradeWorker extends WorkerHost {
-  private static readonly SEND_TRADE_DELAY = 1e3 * 5; // 5 second(s)
-  private static readonly WAIT_TRADE_DELAY = 1e3 * 5; // 5 second(s)
+@Injectable()
+export class SingleTradeWorker implements OnModuleInit {
+  private static readonly WAIT_TRADE_DELAY = 1e3 * 2.5; // 2.5 second(s)
+  private static readonly PAUSE_TRADE_DELAY = 1e3 * 60; // 1 minute(s)
+
   private static readonly DELAYED_TRADE_THRESHOLD = 1e3 * 60; // 1 minute(s)
   private static readonly DELAYED_TRADE_TIMEOUT = 1e3 * 60; // 1 minute(s)
   private static readonly BACKLOGGED_TRADE_THRESHOLD = 1e3 * 60 * 5; // 5 minute(s)
-  private static readonly BACKLOGGED_TRADE_TIMEOUT = 1e3 * 60 * 25; // 25 minute(s)
+  private static readonly BACKLOGGED_TRADE_TIMEOUT = 1e3 * 60 * 10; // 10 minute(s)
 
   private readonly logger = new Logger(SingleTradeWorker.name);
 
   constructor(
-    private readonly cryptService: CryptService,
+    private readonly eventEmitter: EventEmitter2,
     private readonly singleTradeUtil: SingleTradeHandler,
     private readonly singleTradeService: SingleTradeService
-  ) {
-    super();
+  ) {}
+
+  async onModuleInit() {
+    // Resume pause timers.
+    await this.resumePauseTimers();
+    // Resume processable.
+    await this.resumeProcessable();
   }
 
-  async process(job: Job<SingleTradeJobData>): Promise<void> {
-    this.logger.debug(`Processing job ${job.id}...`);
-    const singleTradeId = job.data.singleTradeId;
-    const singleTrade = await this.singleTradeService.findById(singleTradeId);
-    if (!singleTrade) {
-      return this.logger.error(`Single-Trade ${singleTradeId} not found.`);
+  async resumePauseTimers(): Promise<void> {
+    const singleTrades = await this.singleTradeService.findPaused();
+    if (singleTrades.length === 0) {
+      return;
     }
-    try {
-      if (singleTrade.step === SingleTradeStep.None) {
-        singleTrade.status = SingleTradeStatus.Processing;
-        singleTrade.step = SingleTradeStep.Start_Trade;
-        await this.singleTradeService.save(singleTrade);
-        this.logger.debug(`Initialized Single-Trade ${singleTrade._id}.`);
+    this.logger.debug(
+      `Resuming ${singleTrades.length} Single-Trade(s) pause timers...`
+    );
+    const handleTimeouts = [];
+    for (const singleTrade of singleTrades) {
+      const timeLeft =
+        SingleTradeWorker.PAUSE_TRADE_DELAY -
+        (Date.now() - singleTrade.updatedAt.getTime());
+      if (timeLeft <= 0) {
+        handleTimeouts.push(
+          this.handleFailed(singleTrade, new Error("Pause timed out."))
+        );
+      } else {
+        setTimeout(() => this.handlePauseTimeout(singleTrade._id), timeLeft);
       }
-      if (singleTrade.step === SingleTradeStep.Start_Trade) {
-        await this.handleStart(job, singleTrade);
-      } else if (singleTrade.step === SingleTradeStep.Wait_Trade) {
-        await this.handleWait(job, singleTrade);
-      }
-    } catch (error) {
-      if (error instanceof DelayedError) {
-        throw error;
-      }
-      this.logger.error(
-        `Error processing job ${job.id}: ${(error as Error).message}`
-      );
+    }
+    if (handleTimeouts.length > 0) {
+      await Promise.all(handleTimeouts);
     }
   }
 
-  async handleStart(
-    job: Job<SingleTradeJobData>,
-    singleTrade: SingleTrade
-  ): Promise<void> {
-    singleTrade.depth = SingleTradeDepth.Prepare_Trade;
-    singleTrade.startedAt = new Date();
-    await this.singleTradeService.save(singleTrade);
-    this.logger.debug(`Starting Single-Trade ${singleTrade._id}...`);
+  async resumeProcessable(): Promise<void> {
+    const singleTrades = await this.singleTradeService.findProcessable();
+    if (singleTrades.length === 0) {
+      return;
+    }
+    this.logger.log(`Resuming ${singleTrades.length} Single-Trade(s)...`);
+    const processing = [];
+    for (const singleTrade of singleTrades) {
+      const processor =
+        singleTrade.step === SingleTradeStep.Start_Trade
+          ? this.handleStart(singleTrade)
+          : this.handleWait(singleTrade);
+      processing.push(processor);
+    }
+    await Promise.all(processing);
+  }
 
+  async handleStart(singleTrade: SingleTrade): Promise<void> {
+    if (
+      singleTrade.step !== SingleTradeStep.Start_Trade ||
+      !singleTrade.sender ||
+      !singleTrade.accepter
+    ) {
+      return this.handleFailed(singleTrade, new Error("State invalid."));
+    }
     try {
-      this.ensureCredentialsAvailable(singleTrade);
-      const [senderRoblosecurity, accepterRoblosecurity] =
-        this.handleDecryptRoblosecurities(singleTrade);
-      const [senderTotpSecret, accepterTotpSecret] =
-        this.handleDecryptTotpSecrets(singleTrade);
-
       // Step 1. Send trade
-      singleTrade.depth = SingleTradeDepth.Send_Trade;
-      await this.singleTradeService.save(singleTrade);
-      const [offer, receive] = this.prepareTradeOffers(singleTrade);
-      const tradeId = await this.singleTradeUtil.trySendTrade({
-        userId: singleTrade.sender.id,
-        roblosecurity: senderRoblosecurity,
-        totpSecret: senderTotpSecret,
-        offer,
-        receive,
-      });
-      singleTrade.trade = { id: tradeId, status: "Unknown" };
-      await this.worker.delay(SingleTradeWorker.SEND_TRADE_DELAY);
-
+      if (!singleTrade.trade) {
+        singleTrade.depth = SingleTradeDepth.Send_Trade;
+        await this.singleTradeService.save(singleTrade);
+        const [offer, receive] = this.prepareOffers(singleTrade);
+        this.logger.debug(
+          `User ${singleTrade.sender.id} sending trade to ${singleTrade.accepter.id}...`
+        );
+        const tradeId = await this.singleTradeUtil.trySendTrade({
+          user: singleTrade.sender,
+          offer,
+          receive,
+        });
+        singleTrade.trade = { id: tradeId, status: "Unknown" };
+        await this.singleTradeService.save(singleTrade);
+      }
       // Step 2. Accept trade
       singleTrade.depth = SingleTradeDepth.Accept_Trade;
       await this.singleTradeService.save(singleTrade);
       this.logger.debug(
-        `Accepting Trade ${tradeId} as User ${singleTrade.accepter.id}...`
+        `User ${singleTrade.accepter.id} accepting trade ${singleTrade.trade.id}...`
       );
       const status = await this.singleTradeUtil.tryAcceptTrade({
-        tradeId: tradeId,
-        userId: singleTrade.accepter.id,
-        roblosecurity: accepterRoblosecurity,
-        totpSecret: accepterTotpSecret,
+        user: singleTrade.accepter,
+        tradeId: singleTrade.trade.id,
       });
       singleTrade.trade.status = status;
       if (status === "Completed" || status === "InterventionRequired") {
@@ -114,58 +128,54 @@ export class SingleTradeWorker extends WorkerHost {
       singleTrade.depth = SingleTradeDepth.None;
       await this.singleTradeService.save(singleTrade);
     } catch (error) {
-      this.logger.error(`Failed to start Single-Trade ${singleTrade._id}.`);
-      return this.handleFailed(singleTrade, error as Error);
+      if (
+        RobloxErrorHost.isRobloxError(error) &&
+        error.name === "TradeChallengeError"
+      ) {
+        return this.handlePause(singleTrade);
+      } else {
+        this.logger.error(`Failed to start Single-Trade ${singleTrade._id}.`);
+        return this.handleFailed(singleTrade, error as Error);
+      }
     }
-
-    await job.moveToDelayed(0, job.token);
-    throw new DelayedError();
+    setTimeout(
+      () => this.handleWait(singleTrade),
+      SingleTradeWorker.WAIT_TRADE_DELAY
+    );
   }
 
-  async handleWait(
-    job: Job<SingleTradeJobData>,
-    singleTrade: SingleTrade
-  ): Promise<void> {
-    if (!singleTrade.startedAt) {
-      return this.handleFailed(singleTrade, new Error("Not started."));
+  async handleWait(singleTrade: SingleTrade): Promise<void> {
+    if (
+      singleTrade.step !== SingleTradeStep.Wait_Trade ||
+      !singleTrade.sender ||
+      !singleTrade.sender.credentials ||
+      !singleTrade.accepter ||
+      !singleTrade.accepter.credentials ||
+      !singleTrade.trade ||
+      !singleTrade.startedAt
+    ) {
+      return this.handleFailed(singleTrade, new Error("State invalid."));
     }
-    if (!singleTrade.trade) {
-      return this.handleFailed(singleTrade, new Error("Trade not started."));
-    }
-    this.logger.debug(
-      `Checking Trade ${singleTrade.trade.id} as User ${singleTrade.sender.id}...`
-    );
-
     try {
-      this.ensureCredentialsAvailable(singleTrade);
-      const [senderRoblosecurity, accepterRoblosecurity] =
-        this.handleDecryptRoblosecurities(singleTrade);
-
       // Step 1. Get trade status
       singleTrade.depth = SingleTradeDepth.Check_Trade_As_Sender;
       await this.singleTradeService.save(singleTrade);
       let trade = await this.singleTradeUtil.tryGetTrade(
-        senderRoblosecurity,
+        singleTrade.sender.credentials.roblosecurity,
         singleTrade.trade.id
       );
       let status = trade.status;
       singleTrade.trade.status = status;
-      await this.singleTradeService.save(singleTrade);
       if (status === "Unknown") {
-        this.logger.warn(
-          `Could not determine Trade ${singleTrade.trade.id} status as User ${singleTrade.sender.id}, retrying as User ${singleTrade.accepter.id}...`
-        );
         singleTrade.depth = SingleTradeDepth.Check_Trade_As_Accepter;
         await this.singleTradeService.save(singleTrade);
         trade = await this.singleTradeUtil.tryGetTrade(
-          accepterRoblosecurity,
+          singleTrade.accepter.credentials.roblosecurity,
           singleTrade.trade.id
         );
         status = trade.status;
         singleTrade.trade.status = status;
-        await this.singleTradeService.save(singleTrade);
       }
-
       // Step 2. Check if trade has finished/failed
       if (status === "Completed" || status === "InterventionRequired") {
         return this.handleFinished(singleTrade);
@@ -175,7 +185,6 @@ export class SingleTradeWorker extends WorkerHost {
           new Error(`Trade failed: ${status}`)
         );
       }
-
       // Step 3. Check if trade is delayed
       if (
         singleTrade.status !== SingleTradeStatus.Backlogged &&
@@ -192,57 +201,87 @@ export class SingleTradeWorker extends WorkerHost {
       }
       singleTrade.depth = SingleTradeDepth.None;
       await this.singleTradeService.save(singleTrade);
+      this.handleUpdated(singleTrade);
     } catch (error) {
       this.logger.error(`Failed to check Single-Trade ${singleTrade._id}.`);
-      return this.handleFailed(
-        singleTrade,
-        error as Error | NormalizedRobloxApiError
-      );
+      return this.handleFailed(singleTrade, error as Error | RobloxError);
     }
-
-    let delay =
+    const delay =
       singleTrade.status === SingleTradeStatus.Backlogged
         ? SingleTradeWorker.BACKLOGGED_TRADE_TIMEOUT
         : singleTrade.status === SingleTradeStatus.Delayed
         ? SingleTradeWorker.DELAYED_TRADE_TIMEOUT
         : SingleTradeWorker.WAIT_TRADE_DELAY;
-    const timestamp = Date.now() + delay;
-    await job.moveToDelayed(timestamp, job.token);
-    throw new DelayedError();
+    setTimeout(() => this.handleWait(singleTrade), delay);
+  }
+
+  private async handlePause(singleTrade: SingleTrade): Promise<void> {
+    singleTrade.status = SingleTradeStatus.Paused;
+    await this.singleTradeService.save(singleTrade);
+    this.handleUpdated(singleTrade);
+    const singleTradeId = singleTrade._id;
+    const userId =
+      singleTrade.depth === SingleTradeDepth.Send_Trade
+        ? singleTrade.sender!.id
+        : singleTrade.accepter!.id;
+    const event: SingleTradeChallengeEvent = {
+      singleTradeId,
+      userId,
+    };
+    this.eventEmitter.emit(SINGLE_TRADE_CHALLENGE_EVENT, event);
+    this.logger.debug(`Single-Trade ${singleTrade._id} paused.`);
+    setTimeout(
+      () => this.handlePauseTimeout(singleTradeId),
+      SingleTradeWorker.PAUSE_TRADE_DELAY
+    );
+  }
+
+  private async handlePauseTimeout(singleTradeId: string): Promise<void> {
+    const singleTrade = await this.singleTradeService.findById(singleTradeId);
+    if (!singleTrade) {
+      return this.logger.warn(
+        `Single-Trade ${singleTradeId} not found when handling pause timeout.`
+      );
+    }
+    if (singleTrade.status === SingleTradeStatus.Paused) {
+      await this.handleFailed(singleTrade, new Error("Trade pause timed out."));
+    }
   }
 
   private async handleFinished(singleTrade: SingleTrade): Promise<void> {
     singleTrade.status = SingleTradeStatus.Finished;
     singleTrade.step = SingleTradeStep.None;
     singleTrade.depth = SingleTradeDepth.None;
-    this.handleRedactCredentials(singleTrade);
+    singleTrade.sender = null;
+    singleTrade.accepter = null;
     singleTrade.processedAt = new Date();
     await this.singleTradeService.save(singleTrade);
     this.logger.debug(`Single-Trade ${singleTrade._id} finished.`);
+    this.handleUpdated(singleTrade);
   }
 
   private async handleFailed(
     singleTrade: SingleTrade,
-    error: Error | NormalizedRobloxApiError
+    error: Error | RobloxError
   ): Promise<void> {
     singleTrade.status = SingleTradeStatus.Failed;
-    this.handleRedactCredentials(singleTrade);
-    singleTrade.error =
-      error.name == "TradeSendError" || error.name == "TradeAcceptError"
-        ? (error as NormalizedRobloxApiError)
-        : {
-            statusCode: 500,
-            errorCode: -1,
-            message: error.message,
-          };
+    singleTrade.sender = null;
+    singleTrade.accepter = null;
+    if (!RobloxErrorHost.isRobloxErrorLike(error)) {
+      error = { statusCode: 500, message: error.message };
+    }
+    singleTrade.error = error;
     singleTrade.processedAt = new Date();
     await this.singleTradeService.save(singleTrade);
-    this.logger.error(
-      `Single-Trade ${singleTrade._id} failed: ${error.message}`
-    );
+    this.logger.error(`Single-Trade ${singleTrade._id} failed.`);
+    this.handleUpdated(singleTrade);
   }
 
-  private prepareTradeOffers(singleTrade: SingleTrade): TradeOfferPayload[] {
+  private handleUpdated(singleTrade: SingleTrade): void {
+    this.eventEmitter.emit(SINGLE_TRADE_UPDATED_EVENT, singleTrade);
+  }
+
+  private prepareOffers(singleTrade: SingleTrade): TradeOfferPayload[] {
     return singleTrade.offers.map((offer) => {
       const actualOffer = {
         userId: offer.userId,
@@ -264,45 +303,5 @@ export class SingleTradeWorker extends WorkerHost {
       }
       return actualOffer;
     });
-  }
-
-  private handleRedactCredentials(singleTrade: SingleTrade): void {
-    singleTrade.sender.credentials = null;
-    singleTrade.accepter.credentials = null;
-  }
-
-  private handleDecryptRoblosecurities(
-    singleTrade: SingleTrade
-  ): [string, string] {
-    return [
-      this.cryptService.decrypt(singleTrade.sender.credentials!.roblosecurity),
-      this.cryptService.decrypt(
-        singleTrade.accepter.credentials!.roblosecurity
-      ),
-    ];
-  }
-
-  private handleDecryptTotpSecrets(
-    singleTrade: SingleTrade
-  ): [string | undefined, string | undefined] {
-    return [
-      singleTrade.sender.credentials!.totpSecret
-        ? this.cryptService.decrypt(singleTrade.sender.credentials!.totpSecret)
-        : undefined,
-      singleTrade.accepter.credentials!.totpSecret
-        ? this.cryptService.decrypt(
-            singleTrade.accepter.credentials!.totpSecret
-          )
-        : undefined,
-    ];
-  }
-
-  private ensureCredentialsAvailable(singleTrade: SingleTrade): void {
-    if (!singleTrade.sender.credentials) {
-      throw new Error("Sender credentials redacted.");
-    }
-    if (!singleTrade.accepter.credentials) {
-      throw new Error("Accepter credentials redacted.");
-    }
   }
 }

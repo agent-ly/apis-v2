@@ -1,17 +1,6 @@
 import destr from "destr";
 
-export interface GenericRobloxApiErorr {
-  code: number;
-  message: string;
-  field?: unknown;
-  fieldData?: unknown;
-}
-
-export interface GenericRobloxApiErrorResponse {
-  errors: GenericRobloxApiErorr[];
-}
-
-export interface NormalizedRobloxApiError {
+export interface RobloxError {
   statusCode: number;
   errorCode?: number;
   message: string;
@@ -22,15 +11,29 @@ export interface NormalizedRobloxApiError {
   headers?: Record<string, string>;
 }
 
-export interface NormalizedErrorLike {
-  statusCode: number;
-  errorCode?: number;
-  message: string;
-}
+export type RobloxErrorLike = Pick<
+  RobloxError,
+  "statusCode" | "errorCode" | "message"
+>;
 
-export class RobloxApiError extends Error {
-  static isApiError(error: unknown): error is RobloxApiError {
-    return error instanceof RobloxApiError;
+export class RobloxErrorHost extends Error {
+  static isRobloxErrorLike(error: unknown): error is RobloxErrorLike {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      "message" in error
+    );
+  }
+
+  static isRobloxError(error: unknown): error is RobloxError {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      "message" in error &&
+      "errorCode" in error
+    );
   }
 
   static isAuthorizationError(statusCode: number, errorCode: number): boolean {
@@ -41,8 +44,8 @@ export class RobloxApiError extends Error {
     return statusCode === 403 && errorCode === 9003;
   }
 
-  static toNormalized(error: Error): Promise<NormalizedRobloxApiError> {
-    if (RobloxApiError.isApiError(error)) {
+  static normalize(error: Error): Promise<RobloxError> {
+    if (error instanceof RobloxErrorHost) {
       return error.normalize();
     }
     return Promise.resolve({ statusCode: 500, message: error.message });
@@ -52,7 +55,7 @@ export class RobloxApiError extends Error {
 
   constructor(response: Response) {
     super(`${response.status} ${response.statusText}`);
-    this.name = "RobloxApiError";
+    this.name = "RobloxErrorHost";
     this.cause = response;
   }
 
@@ -60,25 +63,29 @@ export class RobloxApiError extends Error {
     return this.cause.status;
   }
 
-  async normalize(): Promise<NormalizedRobloxApiError> {
-    const error = await this.#readBody();
-    const parsed: NormalizedRobloxApiError = {
+  getStatusText(): string {
+    return this.cause.statusText;
+  }
+
+  async normalize(): Promise<RobloxError> {
+    const body = await this.#readBody();
+    const error: RobloxError = {
       url: this.cause.url.slice(this.cause.url.indexOf("?") + 1),
       statusCode: this.cause.status,
-      errorCode: error.code,
-      message: error.message,
+      errorCode: body.code,
+      message: body.message,
     };
-    if (error.field) {
-      parsed.field = error.field;
+    if (body.field) {
+      error.field = body.field;
     }
-    if (error.fieldData) {
-      parsed.fieldData = error.fieldData;
+    if (body.fieldData) {
+      error.fieldData = body.fieldData;
     }
-    const headers = this.#readHeaders();
+    const headers = this.#getExposedHeaders();
     if (headers) {
-      parsed.headers = headers;
+      error.headers = headers;
     }
-    return parsed;
+    return error;
   }
 
   async #readBody(): Promise<GenericRobloxApiErorr> {
@@ -101,7 +108,7 @@ export class RobloxApiError extends Error {
     return error;
   }
 
-  #readHeaders(): Record<string, string> | undefined {
+  #getExposedHeaders(): Record<string, string> | undefined {
     const header = this.cause.headers.get("access-control-expose-headers");
     if (!header) {
       return;
@@ -116,6 +123,17 @@ export class RobloxApiError extends Error {
     }
     return map;
   }
+}
+
+interface GenericRobloxApiErorr {
+  code: number;
+  message: string;
+  field?: unknown;
+  fieldData?: unknown;
+}
+
+interface GenericRobloxApiErrorResponse {
+  errors: GenericRobloxApiErorr[];
 }
 
 const isStringErrorResponse = (error: unknown): error is string =>

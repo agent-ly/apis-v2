@@ -8,7 +8,6 @@ import {
   Query,
 } from "@nestjs/common";
 
-import { MultiTradeStatus } from "./multi_trade.entity.js";
 import { MultiTradeService } from "./multi_trade.service.js";
 
 @Controller("multi-trades")
@@ -21,11 +20,6 @@ export class MultiTradeController {
     @Query("endDate") endDate: Date
   ) {
     return this.multiTradeService.stats(startDate, endDate);
-  }
-
-  @Get("status/:status")
-  async findMultiTradesByStatus(@Param("status") status: MultiTradeStatus) {
-    return this.multiTradeService.findByStatus(status);
   }
 
   @Get(":multiTradeId")

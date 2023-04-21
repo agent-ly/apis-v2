@@ -4,7 +4,7 @@ import { WebSocket, type WebSocketServer as WsServer } from "ws";
 
 import {
   type MultiTrade,
-  MultiTradeJobStrategy,
+  MultiTradeChildStrategy,
   MultiTradeStatus,
 } from "./multi_trade.entity.js";
 import type {
@@ -18,39 +18,35 @@ export class MultiTradeGateway {
   @WebSocketServer()
   server: WsServer;
 
-  emitMultiTradeProcessed(multiTrade: MultiTrade): void {
+  @OnEvent(MULTI_TRADE_PROCESSED_EVENT)
+  onMultiTradeProcessed(multiTrade: MultiTrade): void {
     const result = this.toMultiTradeResult(multiTrade);
     this.broadcastEvent(MULTI_TRADE_PROCESSED_EVENT, result);
   }
 
-  @OnEvent(MULTI_TRADE_PROCESSED_EVENT)
-  handleMultiTradeProcessed(multiTrade: MultiTrade): void {
-    this.emitMultiTradeProcessed(multiTrade);
-  }
-
   toMultiTradeResult(multiTrade: MultiTrade): MultiTradeResult {
     const { senderIds, receiverIds, userAssetIds, participantDetails } =
-      multiTrade.jobs.reduce(
-        (acc, multiTradeJob) => {
-          const [senderId, receiverId] =
-            multiTradeJob.strategy === MultiTradeJobStrategy.Sender_To_Receiver
-              ? [multiTradeJob.offerFromUserId, multiTradeJob.offerToUserId]
-              : [multiTradeJob.offerToUserId, multiTradeJob.offerFromUserId];
-          acc.senderIds.add(senderId);
-          acc.receiverIds.add(receiverId);
-          multiTradeJob.userAssetIds.forEach((userAssetId) =>
+      multiTrade.children.reduce(
+        (acc, child) => {
+          acc.senderIds.add(child.offerFromUserId);
+          acc.receiverIds.add(child.offerToUserId);
+          child.offerFromUserAssetIds.forEach((userAssetId) =>
             acc.userAssetIds.add(userAssetId)
           );
+          const [senderId, receiverId] =
+            child.strategy === MultiTradeChildStrategy.Sender_To_Receiver
+              ? [child.offerFromUserId, child.offerToUserId]
+              : [child.offerToUserId, child.offerFromUserId];
           const sender =
             acc.participantDetails.get(senderId) ??
             this.createMultiTradeResultParticipant();
           const receiver =
             acc.participantDetails.get(receiverId) ??
             this.createMultiTradeResultParticipant();
-          if (multiTradeJob.tradeId) {
+          if (child.tradeId) {
             sender.tradesSent++;
             receiver.tradesReceived++;
-            if (multiTradeJob.tradeStatus === "Completed") {
+            if (child.tradeStatus === "Completed") {
               sender.tradesCompleted++;
               receiver.tradesCompleted++;
             } else {

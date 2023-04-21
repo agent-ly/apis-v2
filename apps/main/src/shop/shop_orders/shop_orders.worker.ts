@@ -79,17 +79,8 @@ export class ShopOrderWorker {
     if (!user.enabled) {
       throw new Error("User is disabled.");
     }
-    if (!user.authenticated) {
-      throw new Error("User is not authenticated.");
-    }
-    if (user.moderated) {
-      throw new Error("User is moderated.");
-    }
-    if (user.frictioned) {
-      throw new Error("User is frictioned.");
-    }
-    const canTrade = await this.canUserTrade(user);
-    if (!canTrade) {
+    const valid = await this.validateUser(user);
+    if (!valid) {
       throw new Error("User cannot trade.");
     }
     const small = await this.itemsService.prepareSmall(userId);
@@ -99,11 +90,12 @@ export class ShopOrderWorker {
     return { user, small };
   }
 
-  private async canUserTrade(user: ShopUser): Promise<boolean> {
+  private async validateUser(user: ShopUser): Promise<boolean> {
     const result = await this.itemsService.canUseItems(
       user.credentials.roblosecurity
     );
     if (result.ok === false && result.error === "unauthorized") {
+      user.enabled = false;
       user.authenticated = false;
       await this.shopUsersService.save(user);
       throw new Error("User is not authenticated.");

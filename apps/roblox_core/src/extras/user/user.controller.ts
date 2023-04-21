@@ -1,5 +1,5 @@
 import { Controller, Get, UseFilters, Param, Query } from "@nestjs/common";
-import { RobloxApiErrorFilter } from "roblox-proxy-nestjs";
+import { RobloxExceptionFilter } from "roblox-proxy-nestjs";
 import { AccountSettingsApi } from "roblox-proxy-nestjs/apis/account_settings.api";
 import { InventoryApi } from "roblox-proxy-nestjs/apis/inventory.api";
 import { PremiumFeaturesApi } from "roblox-proxy-nestjs/apis/premium_features.api";
@@ -8,7 +8,7 @@ import { UsersApi } from "roblox-proxy-nestjs/apis/users.api";
 import { Roblosecurity } from "../../common/decorators.js";
 
 @Controller("user")
-@UseFilters(RobloxApiErrorFilter)
+@UseFilters(RobloxExceptionFilter)
 export class UserController {
   constructor(
     private readonly accountSettingsApi: AccountSettingsApi,

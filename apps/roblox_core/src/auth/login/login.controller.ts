@@ -1,5 +1,5 @@
 import { Controller, Body, Post, UseFilters } from "@nestjs/common";
-import { RobloxApiErrorFilter } from "roblox-proxy-nestjs";
+import { RobloxExceptionFilter } from "roblox-proxy-nestjs";
 
 import {
   LoginService,
@@ -8,7 +8,7 @@ import {
 } from "./login.service.js";
 
 @Controller("login")
-@UseFilters(RobloxApiErrorFilter)
+@UseFilters(RobloxExceptionFilter)
 export class LoginController {
   constructor(private readonly loginService: LoginService) {}
 

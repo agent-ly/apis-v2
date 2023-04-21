@@ -1,6 +1,9 @@
 import { Body, Controller, Header, Post } from "@nestjs/common";
 
-import { AddOneToOneMutliTradePayloadDto } from "./queue.dtos.js";
+import {
+  AddManyToOneMutliTradePayloadDto,
+  AddOneToOneMutliTradePayloadDto,
+} from "./queue.dtos.js";
 import { QueueService } from "./queue.service.js";
 
 @Controller("queue")
@@ -13,5 +16,13 @@ export class QueueController {
     @Body() payload: AddOneToOneMutliTradePayloadDto
   ): Promise<string> {
     return this.queueService.addOneToOneMultiTrade(payload);
+  }
+
+  @Post("add-many")
+  @Header("Content-Type", "application/json")
+  async addManyToOneMultiTrade(
+    @Body() payload: AddManyToOneMutliTradePayloadDto
+  ): Promise<string> {
+    return this.queueService.addManyToOneMultiTrade(payload);
   }
 }

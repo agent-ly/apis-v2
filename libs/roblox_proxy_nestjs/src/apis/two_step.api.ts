@@ -4,21 +4,10 @@ import { RobloxClient } from "../roblox.client.js";
 
 export type MediaType = "email" | "sms" | "authenticator";
 
-export type RblxChallengeType =
-  | "forceauthenticator"
-  | "twostepverification"
-  | "reauthentication";
-
-export interface RblxChallengeHeaders extends Record<string, any> {
-  "rblx-challenge-id": string;
-  "rblx-challenge-type": string;
-  "rblx-challenge-metadata": string;
-}
-
-export interface RblxChallenge {
-  challengeId: string;
-  challengeType: string;
-  challengeMetadata: string;
+export interface Challenge {
+  id: string;
+  type: string;
+  metadata: string;
 }
 
 export interface GetMetadataQuery {
@@ -50,7 +39,7 @@ export interface GetUserConfigurationResponse {
   methods: UserConfigurationMethod[];
 }
 
-export interface VerifyCodeQuery {
+export interface VerifyCodeParams {
   userId: number;
   mediaType: MediaType;
 }
@@ -126,7 +115,7 @@ export class TwoStepApi {
   }
 
   verifyCode(
-    { userId, mediaType }: VerifyCodeQuery,
+    { userId, mediaType }: VerifyCodeParams,
     data: VerifyCodePayload
   ): Promise<VerifyCodeResponse> {
     const url = `https://twostepverification.roblox.com/v1/users/${userId}/challenges/${mediaType}/verify`;
@@ -155,26 +144,31 @@ export class TwoStepApi {
     return this.client.json<VerifyEnableAuthenticatorResponse>(url, init);
   }
 
-  getRblxChallengeHeaders(headers: Headers): RblxChallengeHeaders {
+  getChallenge(headers: Record<string, any>): Challenge | null {
+    const challengeId = headers["rblx-challenge-id"];
+    const challengeType = headers["rblx-challenge-type"];
+    const challengeMetadata = headers["rblx-challenge-metadata"];
+    if (!challengeId || !challengeType || !challengeMetadata) {
+      return null;
+    }
     return {
-      "rblx-challenge-id": headers.get("rblx-challenge-id") || "",
-      "rblx-challenge-type": headers.get("rblx-challenge-type") || "",
-      "rblx-challenge-metadata": headers.get("rblx-challenge-metadata") || "",
+      id: challengeId,
+      type: challengeType,
+      metadata: challengeMetadata,
     };
   }
 
-  parseRblxChallengeHeaders(headers: RblxChallengeHeaders): RblxChallenge {
-    const {
-      "rblx-challenge-id": challengeId,
-      "rblx-challenge-type": challengeType,
-      "rblx-challenge-metadata": challengeMetadata,
-    } = headers;
-    return { challengeId, challengeType, challengeMetadata };
+  setChallenge(challenge: Challenge, headers: Record<string, any>): void {
+    headers["rblx-challenge-id"] = challenge.id;
+    headers["rblx-challenge-type"] = challenge.type;
+    headers["rblx-challenge-metadata"] = challenge.metadata;
   }
 
-  parseRblxChallengeMetadata(challengeMetadata: string): string {
-    return JSON.parse(
-      Buffer.from(challengeMetadata, "base64").toString("utf-8")
-    );
+  encodeChallengeMetadata(metadata: Record<string, any>): string {
+    return Buffer.from(JSON.stringify(metadata)).toString("base64");
+  }
+
+  decodeChallengeMetadata(metadata: string): Record<string, any> {
+    return JSON.parse(Buffer.from(metadata, "base64").toString("utf-8"));
   }
 }

@@ -4,11 +4,11 @@ import {
   type ArgumentsHost,
 } from "@nestjs/common";
 
-import { RobloxApiError } from "../errors/roblox-api.error.js";
+import { RobloxErrorHost } from "./roblox.error-host.js";
 
-@Catch(RobloxApiError)
-export class RobloxApiErrorFilter implements ExceptionFilter {
-  async catch(error: RobloxApiError, host: ArgumentsHost) {
+@Catch(RobloxErrorHost)
+export class RobloxExceptionFilter implements ExceptionFilter {
+  async catch(error: RobloxErrorHost, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const reply = ctx.getResponse();
     const normalized = await error.normalize();

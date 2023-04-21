@@ -12,24 +12,25 @@ export const enum MultiTradeStatus {
 
 export const enum MultiTradeStep {
   None = "none",
-  Start_Trade = "start_trade",
-  Wait_Trade = "wait_trade",
+  Start_Child = "start_child",
+  Wait_Child = "wait_child",
 }
 
-export const enum MultiTradeJobStrategy {
+export const enum MultiTradeChildStrategy {
   Sender_To_Receiver = "sender_to_receiver",
   Receiver_To_Sender = "receiver_to_sender",
 }
 
-export interface MultiTradeJob {
-  strategy: MultiTradeJobStrategy;
+export interface MultiTradeChild {
+  strategy: MultiTradeChildStrategy;
 
   offerFromUserId: number;
   offerToUserId: number;
-  userAssetIds: number[];
+  offerFromUserAssetIds: number[];
+  offerToUserAssetIds: number[];
 
-  refId: string | null;
-  refStatus: SingleTradeStatus | null;
+  id: string | null;
+  status: SingleTradeStatus | null;
   tradeId: number | null;
   tradeStatus: string | null;
 
@@ -37,7 +38,7 @@ export interface MultiTradeJob {
   processedAt: Date | null;
 }
 
-export interface MultiTradeCredential {
+export interface MultiTradeUser {
   roblosecurity: string;
   totpSecret?: string;
 }
@@ -48,12 +49,12 @@ export interface MultiTrade {
   status: MultiTradeStatus;
   step: MultiTradeStep;
 
-  currentJobIndex: number | null;
-  jobs: MultiTradeJob[];
-
-  credentials: Map<number, MultiTradeCredential> | null; // userId -> credentials
+  users: Map<number, MultiTradeUser> | null; // userId -> user
   userAssetIds: Map<number, number[]>; // userId -> userAssetIds
   recyclableUserAssetIds: Map<number, number[]>; // userId -> userAssetIds
+
+  children: MultiTradeChild[];
+  current: number | null;
 
   error: SingleTrade["error"];
 
@@ -68,9 +69,9 @@ export interface MultiTrade {
 export interface SerializedMultiTrade
   extends Omit<
     MultiTrade,
-    "credentials" | "userAssetIds" | "recyclableUserAssetIds"
+    "users" | "userAssetIds" | "recyclableUserAssetIds"
   > {
-  credentials: [number, MultiTradeCredential][] | null;
+  users: string | null;
   userAssetIds: [number, number[]][];
   recyclableUserAssetIds: [number, number[]][];
 }

@@ -1,4 +1,4 @@
-import type { NormalizedRobloxApiError } from "roblox-proxy-nestjs";
+import type { RobloxError } from "roblox-proxy-nestjs";
 import type { TradeStatus } from "roblox-proxy-nestjs/apis/trades.api";
 
 export const enum SingleTradeStatus {
@@ -8,6 +8,7 @@ export const enum SingleTradeStatus {
   Failed = "failed",
   Delayed = "delayed",
   Backlogged = "backlogged",
+  Paused = "paused",
 }
 
 export const enum SingleTradeStep {
@@ -27,11 +28,9 @@ export const enum SingleTradeDepth {
 
 export interface SingleTradeUser {
   id: number;
-  credentials: {
-    roblosecurity: string;
-    totpSecret?: string;
-    totpCode?: string;
-  } | null;
+  credentials: { roblosecurity: string } | null;
+  totp?: { secret?: string; code?: string };
+  challenge?: Record<string, any>;
 }
 
 export interface SingleTradeOffer {
@@ -43,12 +42,14 @@ export interface SingleTradeOffer {
 export interface SingleTrade {
   _id: string;
 
+  parentId: string;
+
   status: SingleTradeStatus;
   step: SingleTradeStep;
   depth: SingleTradeDepth;
 
-  sender: SingleTradeUser;
-  accepter: SingleTradeUser;
+  sender: SingleTradeUser | null;
+  accepter: SingleTradeUser | null;
   offers: [SingleTradeOffer, SingleTradeOffer]; // [senderOffer, accepterOffer]
 
   trade: {
@@ -56,11 +57,18 @@ export interface SingleTrade {
     status: TradeStatus;
   } | null;
 
-  error: NormalizedRobloxApiError | null;
+  error: RobloxError | null;
 
+  runAt: Date | null;
   startedAt: Date | null;
   processedAt: Date | null;
 
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface SerializedSingleTrade
+  extends Omit<SingleTrade, "sender" | "accepter"> {
+  sender: string | null;
+  accepter: string | null;
 }

@@ -1,16 +1,15 @@
 import { Injectable, Logger } from "@nestjs/common";
-import {
-  RobloxApiError,
-  type NormalizedRobloxApiError,
-} from "roblox-proxy-nestjs";
+import { RobloxErrorHost, type RobloxError } from "roblox-proxy-nestjs";
 import {
   TradesApi,
   type TradeOfferPayload,
   type TradeStatus,
 } from "roblox-proxy-nestjs/apis/trades.api";
 import { TwoStepApi } from "roblox-proxy-nestjs/apis/two_step.api";
-import { Result } from "errd/result";
+import { Result } from "errd";
 import totp from "totp-generator";
+
+import type { SingleTradeUser } from "./single_trade.entity.js";
 
 @Injectable()
 export class SingleTradeHandler {
@@ -22,21 +21,20 @@ export class SingleTradeHandler {
   ) {}
 
   async trySendTrade({
-    userId,
-    roblosecurity,
-    totpSecret,
+    user,
     offer,
     receive,
-    headers,
   }: TrySendTradePayload): Promise<number> {
+    console.dir(user, { depth: null });
+    const headers = await this.tryGetHeaders(user);
     const data = { offers: [offer, receive] };
     const result = await Result.fromAsync(() =>
-      this.tradesApi.sendTrade(roblosecurity, data, headers)
+      this.tradesApi.sendTrade(user.credentials!.roblosecurity, data, headers)
     );
     if (result.isErr()) {
-      const error = await RobloxApiError.toNormalized(result.unwrapErr());
-      const details = this.handleNormalizedError({ userId, error });
+      const error = await RobloxErrorHost.normalize(result.unwrapErr());
       error.name = "TradeSendError";
+      const details = this.tryHandleError(user.id, error);
       if (!details.handled) {
         if (error.statusCode === 400 && error.errorCode === 12) {
           error.message = "An item is no longer available to trade.";
@@ -44,80 +42,58 @@ export class SingleTradeHandler {
           error.message =
             "Your account has sent too many trades recently, please try again later.";
           error.field = "userId";
-          error.fieldData = userId;
+          error.fieldData = user.id;
         }
-      } else if (totpSecret && this.isTwoStepVerificationError(details)) {
-        return this.withTwoStepVerificationError(
-          {
-            userId,
-            roblosecurity,
-            totpSecret,
-            error,
-            details,
-          },
-          (headers) =>
-            this.trySendTrade({
-              userId,
-              roblosecurity,
-              totpSecret,
-              offer,
-              receive,
-              headers,
-            })
-        );
+      } else if (this.canHaveChallenge(details)) {
+        this.tryGetChallenge(user, error, details);
+        if (user.totp?.secret) {
+          return this.trySendTrade({ user, offer, receive });
+        }
       }
       throw error;
     }
     const { id: tradeId } = result.unwrap();
-    this.logger.debug(`Sent Trade ${tradeId} as User ${userId}.`);
+    this.logger.debug(`Sent Trade ${tradeId} as User ${user.id}.`);
     return tradeId;
   }
 
   async tryAcceptTrade({
-    userId,
+    user,
     tradeId,
-    roblosecurity,
-    totpSecret,
-    headers,
   }: TryAcceptTradePayload): Promise<TradeStatus> {
+    const headers = await this.tryGetHeaders(user);
     const result = await Result.fromAsync(() =>
-      this.tradesApi.acceptTrade(roblosecurity, tradeId, headers)
+      this.tradesApi.acceptTrade(
+        user.credentials!.roblosecurity,
+        tradeId,
+        headers
+      )
     );
     if (result.isErr()) {
-      const error = await RobloxApiError.toNormalized(result.unwrapErr());
-      const details = this.handleNormalizedError({ userId, error });
+      const error = await RobloxErrorHost.normalize(result.unwrapErr());
+      error.name = "TradeAcceptError";
+      const details = this.tryHandleError(user.id, error);
       if (!details.handled) {
         if (error.statusCode === 400 && error.errorCode === 3) {
-          const { status } = await this.tryGetTrade(roblosecurity, tradeId);
+          const { status } = await this.tryGetTrade(
+            user.credentials!.roblosecurity,
+            tradeId
+          );
           if (status === "Completed" || status === "InterventionRequired") {
             this.logger.debug(`Trade ${tradeId} is already completed.`);
             return status;
           }
           error.message = `Trade is no longer active: ${status}`;
         }
-      } else if (totpSecret && this.isTwoStepVerificationError(details)) {
-        return this.withTwoStepVerificationError(
-          {
-            userId,
-            roblosecurity,
-            totpSecret,
-            error,
-            details,
-          },
-          (headers) =>
-            this.tryAcceptTrade({
-              userId,
-              tradeId,
-              roblosecurity,
-              totpSecret,
-              headers,
-            })
-        );
+      } else if (this.canHaveChallenge(details)) {
+        this.tryGetChallenge(user, error, details);
+        if (user.totp?.secret) {
+          return this.tryAcceptTrade({ user, tradeId });
+        }
       }
-      error.name = "TradeAcceptError";
       throw error;
     }
-    this.logger.debug(`Accepted Trade ${tradeId} as User ${userId}.`);
+    this.logger.debug(`Accepted Trade ${tradeId} as User ${user.id}.`);
     return "Processing";
   }
 
@@ -129,35 +105,29 @@ export class SingleTradeHandler {
       this.tradesApi.getTrade(roblosecurity, tradeId)
     );
     if (result.isErr()) {
-      const error = await RobloxApiError.toNormalized(result.unwrapErr());
-      this.logger.error(`Failed to get Trade ${tradeId}: ${error.message}`);
       return { isActive: false, status: "Unknown" };
     }
     const trade = result.unwrap();
     return { isActive: trade.isActive, status: trade.status };
   }
 
-  async tryDeclineTrade(roblosecurity: string, tradeId: number): Promise<void> {
+  async tryDeclineTrade(
+    roblosecurity: string,
+    tradeId: number
+  ): Promise<boolean> {
     const result = await Result.fromAsync(() =>
       this.tradesApi.declineTrade(roblosecurity, tradeId)
     );
-    if (result.isErr()) {
-      const error = await RobloxApiError.toNormalized(result.unwrapErr());
-      this.logger.error(`Failed to decline Trade ${tradeId}: ${error.message}`);
-    } else {
-      this.logger.debug(`Declined Trade ${tradeId}.`);
-    }
+    return result.isOk();
   }
 
   async trySolveTradeFriction(
     payload: TrySolveTradeFrictionPayload
   ): Promise<boolean> {
     try {
-      this.logger.debug(`Solving trade triction for User ${payload.userId}...`);
       const challengeId = await this.tradesApi.generateTwoStepChallenge(
         payload.roblosecurity
       );
-      const code = totp(payload.totpSecret);
       const { verificationToken } = await this.twoStepApi.verifyCode(
         {
           userId: payload.userId,
@@ -166,129 +136,108 @@ export class SingleTradeHandler {
         {
           actionType: "ItemTrade",
           challengeId,
-          code,
+          code: payload.code,
         }
       );
       await this.tradesApi.redeemTwoStepChallenge(payload.roblosecurity, {
         challengeToken: challengeId,
         verificationToken,
       });
-      this.logger.debug(`Solved trade triction for User ${payload.userId}.`);
       return true;
     } catch (error) {
-      let message = (error as Error).message;
-      if (error instanceof RobloxApiError) {
-        const normalized = await RobloxApiError.toNormalized(error);
-        error = normalized.message;
+      if (error instanceof RobloxErrorHost) {
+        console.dir(await error.normalize(), { depth: null });
       }
-      this.logger.debug(
-        `Failed to solve trade triction for User ${payload.userId}: ${message}`
-      );
       return false;
     }
   }
 
   async trySolveTradeTwoStepVerification(
     payload: TrySolveTradeTwoStepVerificationPayload
-  ): Promise<Record<string, any> | false> {
+  ): Promise<Record<string, any> | undefined> {
     try {
-      const rblxChallengeId = payload.headers["rbx-challenge-id"],
-        rblxChallengeType = payload.headers["rbx-challenge-type"];
-      let rblxChallengeMetadata = JSON.parse(
-        Buffer.from(
-          payload.headers["rblx-challenge-metadata"],
-          "base64"
-        ).toString("utf8")
-      );
-      const { challengeId, actionType } = rblxChallengeMetadata;
-      const code = totp(payload.totpSecret);
+      const { challengeId, actionType } =
+        this.twoStepApi.decodeChallengeMetadata(payload.challengeMetadata);
       const { verificationToken } = await this.twoStepApi.verifyCode(
-        {
-          userId: payload.userId,
-          mediaType: "authenticator",
-        },
-        {
-          actionType,
-          challengeId,
-          code,
-        }
+        { userId: payload.userId, mediaType: "authenticator" },
+        { actionType, challengeId, code: payload.code }
       );
-      rblxChallengeMetadata = Buffer.from(
-        JSON.stringify({
-          verificationToken,
-          challengeId,
-          actionType,
-        })
-      ).toString("base64");
+      const challengeMetadata = this.twoStepApi.encodeChallengeMetadata({
+        verificationToken,
+        challengeId,
+        actionType,
+      });
       return {
-        "rblx-challenge-id": rblxChallengeId,
-        "rblx-challenge-type": rblxChallengeType,
-        "rblx-challenge-metadata": rblxChallengeMetadata,
+        "rblx-challenge-id": payload.challengeId,
+        "rblx-challenge-type": payload.challengeId,
+        "rblx-challenge-metadata": challengeMetadata,
       };
     } catch (error) {
-      return false;
+      if (error instanceof RobloxErrorHost) {
+        console.dir(await error.normalize(), { depth: null });
+      }
     }
   }
 
-  isTwoStepVerificationError(details: HandledNormalizedErrorDetails): boolean {
+  async tryGetHeaders(user: SingleTradeUser) {
+    let headers: Record<string, any> | undefined;
+    if (user.totp && user.challenge) {
+      if (!user.totp.code && user.totp.secret) {
+        user.totp.code = totp(user.totp.secret);
+      }
+      if (user.totp.code) {
+        if (user.challenge.type === "twostepverification") {
+          headers = await this.trySolveTradeTwoStepVerification({
+            userId: user.id,
+            roblosecurity: user.credentials!.roblosecurity,
+            code: user.totp.code,
+            challengeId: user.challenge.id,
+            challengeType: user.challenge.type,
+            challengeMetadata: user.challenge.metadata,
+          });
+        } else if (user.challenge.type === "twostepverificationexpired") {
+          await this.trySolveTradeFriction({
+            userId: user.id,
+            roblosecurity: user.credentials!.roblosecurity,
+            code: user.totp.code,
+          });
+        } else {
+          throw new Error(`Unknown challenge type: ${user.challenge.type}`);
+        }
+        user.totp = undefined;
+        user.challenge = undefined;
+      }
+    }
+    return headers;
+  }
+
+  tryGetChallenge(
+    user: SingleTradeUser,
+    error: RobloxError,
+    result: HandledErrorDetails
+  ) {
+    if (result.isTwoStepVerificationExpired) {
+      const challenge = { type: "twostepverificationexpired" };
+      user.challenge = challenge;
+    } else if (result.isTwoStepVerificationRequired && error.headers) {
+      const challenge = this.twoStepApi.getChallenge(error.headers);
+      if (challenge) {
+        user.challenge = challenge;
+      }
+    }
+    if (user.challenge) {
+      error.name = "TradeChallengeError";
+    }
+  }
+
+  canHaveChallenge(result: HandledErrorDetails) {
     return (
-      details.isTwoStepVerificationExpired ||
-      details.isTwoStepVerificationRequired
+      result.isTwoStepVerificationExpired ||
+      result.isTwoStepVerificationRequired
     );
   }
 
-  async withTwoStepVerificationError<T>(
-    {
-      userId,
-      roblosecurity,
-      totpSecret,
-      error,
-      details,
-    }: WithTwoStepVerificationArgs,
-    callback: (headers?: Record<string, any>) => Promise<T>
-  ): Promise<T> {
-    const result = await this.handleTwoStepVerificationError({
-      userId,
-      roblosecurity,
-      totpSecret,
-      error,
-      details,
-    });
-    if (result !== false) {
-      const headers = typeof result === "object" ? result : undefined;
-      return callback(headers);
-    }
-    throw error;
-  }
-
-  async handleTwoStepVerificationError({
-    userId,
-    roblosecurity,
-    totpSecret,
-    error,
-    details,
-  }: HandleTwoStepVerificationErrorArgs) {
-    const result = details.isTwoStepVerificationExpired
-      ? await this.trySolveTradeFriction({
-          userId,
-          roblosecurity,
-          totpSecret,
-        })
-      : details.isTwoStepVerificationRequired && error.headers
-      ? await this.trySolveTradeTwoStepVerification({
-          userId,
-          roblosecurity,
-          totpSecret,
-          headers: error.headers,
-        })
-      : false;
-    return result;
-  }
-
-  handleNormalizedError({
-    userId,
-    error,
-  }: HandleNormalizedErrorArgs): HandledNormalizedErrorDetails {
+  tryHandleError(userId: number, error: RobloxError): HandledErrorDetails {
     const isServerError = error.statusCode >= 500;
     const isAuthenticationInvalid =
       error.statusCode === 401 &&
@@ -297,10 +246,9 @@ export class SingleTradeHandler {
       error.statusCode === 400 && error.errorCode === 23;
     const [isTwoStepVerificationRequired, isAuthenticatorRequired] =
       (error.statusCode === 403 &&
-        error.errorCode === 0 &&
         error.headers != undefined && [
-          error.headers["rbx-challenge-type"] === "twostepverification",
-          error.headers["rbx-challenge-type"] === "forceauthenticator",
+          error.headers["rblx-challenge-type"] === "twostepverification",
+          error.headers["rblx-challenge-type"] === "forceauthenticator",
         ]) || [false, false];
 
     if (isServerError) {
@@ -345,53 +293,15 @@ export class SingleTradeHandler {
   }
 }
 
-interface HandleNormalizedErrorArgs {
-  userId: number;
-  error: NormalizedRobloxApiError;
-}
-
-interface HandledNormalizedErrorDetails {
-  handled: boolean;
-  isServerError: boolean;
-  isAuthenticationInvalid: boolean;
-  isTwoStepVerificationExpired: boolean;
-  isTwoStepVerificationRequired: boolean;
-  isAuthenticatorRequired: boolean;
-}
-
-interface HandleTwoStepVerificationErrorArgs {
-  userId: number;
-  roblosecurity: string;
-  totpSecret: string;
-  error: NormalizedRobloxApiError;
-  details: HandledNormalizedErrorDetails;
-}
-
-interface WithTwoStepVerificationArgs {
-  userId: number;
-  roblosecurity: string;
-  totpSecret: string;
-  error: NormalizedRobloxApiError;
-  details: HandledNormalizedErrorDetails;
-}
-
 interface TrySendTradePayload {
-  userId: number;
-  roblosecurity: string;
-  totpSecret?: string;
-  totpCode?: string;
+  user: SingleTradeUser;
   offer: TradeOfferPayload;
   receive: TradeOfferPayload;
-  headers?: Record<string, any>;
 }
 
 interface TryAcceptTradePayload {
+  user: SingleTradeUser;
   tradeId: number;
-  userId: number;
-  roblosecurity: string;
-  totpSecret?: string;
-  totpCode?: string;
-  headers?: Record<string, any>;
 }
 
 interface TryGetTradeResult {
@@ -402,12 +312,23 @@ interface TryGetTradeResult {
 interface TrySolveTradeFrictionPayload {
   userId: number;
   roblosecurity: string;
-  totpSecret: string;
+  code: string;
 }
 
 interface TrySolveTradeTwoStepVerificationPayload {
   userId: number;
   roblosecurity: string;
-  totpSecret: string;
-  headers: Record<string, any>;
+  code: string;
+  challengeId: string;
+  challengeType: string;
+  challengeMetadata: string;
+}
+
+interface HandledErrorDetails {
+  handled: boolean;
+  isServerError: boolean;
+  isAuthenticationInvalid: boolean;
+  isTwoStepVerificationExpired: boolean;
+  isTwoStepVerificationRequired: boolean;
+  isAuthenticatorRequired: boolean;
 }

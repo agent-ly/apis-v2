@@ -6,5 +6,17 @@ export interface SingleTradeJobData {
 
 export type AddSingleTradePayload = Pick<
   SingleTrade,
-  "sender" | "accepter" | "offers"
+  "parentId" | "sender" | "accepter" | "offers"
 >;
+
+export interface SingleTradeChallengeEvent {
+  singleTradeId: string;
+  userId: number;
+}
+
+export interface SingleTradeAuthorizeEvent {
+  singleTradeId: string;
+  userId: number;
+  secret?: string;
+  code?: string;
+}

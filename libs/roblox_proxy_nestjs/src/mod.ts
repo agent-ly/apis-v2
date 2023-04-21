@@ -1,4 +1,4 @@
-export * from "./errors/roblox-api.error.js";
-export * from "./common/roblox-api.exception-filter.js";
+export * from "./roblox.error-host.js";
+export * from "./roblox.exception-filter.js";
 export * from "./roblox.client.js";
 export * from "./roblox.module.js";

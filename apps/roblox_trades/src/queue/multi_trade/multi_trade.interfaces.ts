@@ -1,7 +1,7 @@
 import type {
   MultiTrade,
-  MultiTradeCredential,
-  MultiTradeJob,
+  MultiTradeUser,
+  MultiTradeChild,
   MultiTradeStatus,
 } from "./multi_trade.entity.js";
 
@@ -10,8 +10,8 @@ export interface MultiTradeJobData {
 }
 
 export interface AddMultiTradePayload {
-  jobs: MultiTradeJob[];
-  credentials: [number, MultiTradeCredential][];
+  children: MultiTradeChild[];
+  users: [number, MultiTradeUser][];
   userAssetIds: [number, number[]][];
   recyclableUserAssetIds: [number, number[]][];
 }

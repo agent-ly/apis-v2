@@ -1,10 +1,10 @@
 import { Body, Controller, Post, UseFilters } from "@nestjs/common";
-import { RobloxApiErrorFilter } from "roblox-proxy-nestjs";
+import { RobloxExceptionFilter } from "roblox-proxy-nestjs";
 
 import { LinkService, type LinkPayload } from "./link.service.js";
 
 @Controller("link")
-@UseFilters(RobloxApiErrorFilter)
+@UseFilters(RobloxExceptionFilter)
 export class LinkController {
   constructor(private readonly linkService: LinkService) {}
 

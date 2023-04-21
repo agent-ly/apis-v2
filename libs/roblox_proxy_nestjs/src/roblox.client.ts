@@ -3,7 +3,7 @@ import { getRoblosecurityPrefix } from "roblox-util/roblosecurity";
 import { isSession, decodeSession } from "roblox-proxy-core/sessions";
 import { request, type RequestOptions } from "roblox-proxy-core/client";
 
-import { RobloxApiError } from "./errors/roblox-api.error.js";
+import { RobloxErrorHost } from "./roblox.error-host.js";
 
 @Injectable()
 export class RobloxClient {
@@ -25,7 +25,7 @@ export class RobloxClient {
     }
     const response = await request(url, { init, config });
     if (!response.ok) {
-      throw new RobloxApiError(response);
+      throw new RobloxErrorHost(response);
     }
     return response;
   }

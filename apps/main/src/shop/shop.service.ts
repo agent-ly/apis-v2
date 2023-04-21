@@ -171,6 +171,13 @@ export class ShopService {
       }
     }
     const totalPrice = sumBy(items, "price");
+    if (payload.expectedTotalPrice !== totalPrice) {
+      throw new BadRequestException({
+        error: "total_price_mismatch",
+        message:
+          "The total price of the items does not match the expected total price.",
+      });
+    }
     await this.walletService.subtractBalance({
       userId: payload.userId,
       event: TransactionEvent.Shop_Buy,
@@ -232,12 +239,14 @@ export class ShopService {
     });
     for (let i = 0; i < orders.length; i++) {
       const order = orders[i];
-      if (i !== orders.length - 1) {
-        order.nextId = orders[i + 1]._id;
+      const nextOrder = orders[i + 1];
+      if (nextOrder) {
+        order.nextId = nextOrder._id;
       }
       await this.shopOrdersService.add(order);
     }
-    await this.shopOrdersService.moveToPending(orders[0]);
+    const firstOrder = orders[0];
+    await this.shopOrdersService.moveToPending(firstOrder);
   }
 
   private async handleUnlistItems(payload: UnlistItemsPayload): Promise<void> {
@@ -369,7 +378,9 @@ export class ShopService {
     }
   }
 
-  async handleItemsFailed(event: ItemTransactionFailedEvent): Promise<void> {}
+  async handleItemsFailed(
+    event: ItemTransactionProcessedEvent
+  ): Promise<void> {}
 }
 
 interface AuthorizedPayload {
@@ -390,6 +401,7 @@ interface OrderItemsPayload extends AuthorizedPayload {
 }
 
 interface BuyItemsPayload extends OrderItemsPayload {
+  expectedTotalPrice: number;
   smallItemId: number;
 }
 

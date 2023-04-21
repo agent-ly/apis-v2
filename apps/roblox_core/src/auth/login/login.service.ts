@@ -1,5 +1,4 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
-import { Result } from "errd/result";
 import {
   parseRoblosecurity,
   setRoblosecurityPrefix,
@@ -9,12 +8,12 @@ import { generateClientId, encodeSession } from "roblox-proxy-core/sessions";
 import { AccountSecurityApi } from "roblox-proxy-nestjs/apis/account_security.api";
 import {
   AuthApi,
-  type LoginHeaders,
   type LoginPayload,
   type LoginResponse,
 } from "roblox-proxy-nestjs/apis/auth.api";
 import { ProofOfWorkApi } from "roblox-proxy-nestjs/apis/proof_of_work.api";
 import { TwoStepApi } from "roblox-proxy-nestjs/apis/two_step.api";
+import { Result } from "errd";
 
 import { withError } from "../../common/utils.js";
 
@@ -64,7 +63,7 @@ export class LoginService {
 
   async login(payload: LoginWithUsernamePayload) {
     // Step 1. Prepare the request headers and payload.
-    const requestHeaders: Partial<LoginHeaders> = {};
+    const headers: Record<string, any> = {};
     if (
       payload.challengeId &&
       payload.challengeType &&
@@ -74,15 +73,14 @@ export class LoginService {
       if (payload.challengeType !== "proofofwork") {
         throw new BadRequestException("Invalid challenge type.");
       }
-      requestHeaders["rblx-challenge-metadata"] =
-        await this.solveProofOfWorkPuzzle(
-          payload.proofOfWorkPuzzleSessionId,
-          payload.proofOfWorkPuzzleSolution
-        );
-      requestHeaders["rblx-challenge-id"] = payload.challengeId;
-      requestHeaders["rblx-challenge-type"] = payload.challengeType;
+      headers["rblx-challenge-id"] = payload.challengeId;
+      headers["rblx-challenge-type"] = payload.challengeType;
+      headers["rblx-challenge-metadata"] = await this.solveProofOfWorkPuzzle(
+        payload.proofOfWorkPuzzleSessionId,
+        payload.proofOfWorkPuzzleSolution
+      );
     }
-    const requestPayload: LoginPayload = {
+    const data: LoginPayload = {
       ctype: "Username",
       cvalue: payload.username,
       password: payload.password,
@@ -92,33 +90,27 @@ export class LoginService {
       payload.securityQuestionUserId &&
       payload.securityQuestionAnswer
     ) {
-      requestPayload.securityQuestionRedemptionToken =
-        await this.answerSecurityQuestion(
-          payload.securityQuestionSessionId,
-          payload.securityQuestionUserId,
-          payload.securityQuestionAnswer
-        );
-      requestPayload.securityQuestionSessionId =
-        payload.securityQuestionSessionId;
+      data.securityQuestionRedemptionToken = await this.answerSecurityQuestion(
+        payload.securityQuestionSessionId,
+        payload.securityQuestionUserId,
+        payload.securityQuestionAnswer
+      );
+      data.securityQuestionSessionId = payload.securityQuestionSessionId;
     }
     if (payload.captchaId && payload.captchaToken) {
-      requestPayload.captchaId = payload.captchaId;
-      requestPayload.captchaToken = payload.captchaToken;
+      data.captchaId = payload.captchaId;
+      data.captchaToken = payload.captchaToken;
     }
 
     // Step 2. Send the request and handle the errorneous response if any.
     const clientId = generateClientId(`cid=Username,${payload.username}`);
-    const requestConfig = {
+    const config = {
       clientId,
       proxyType: LoginService.DEFAULT_PROXY_TYPE,
       proxyLocation: LoginService.DEFAULT_PROXY_LOCATION,
     };
     const result = await Result.fromAsync(() =>
-      this.authApi.login(
-        requestPayload,
-        requestConfig,
-        requestHeaders as LoginHeaders
-      )
+      this.authApi.login(data, config, headers)
     );
     if (result.isErr()) {
       return withError(result, async (error) => {
@@ -128,7 +120,13 @@ export class LoginService {
             throw new BadRequestException("Incorrect password.");
           } else if (error.errorCode === 0 && error.headers) {
             // Challenge required
-            if (error.headers["rblx-challenge-type"] !== "proofofwork") {
+            const challenge = this.twoStepApi.getChallenge(error.headers);
+            if (!challenge) {
+              throw new BadRequestException(
+                "Expected a challenge to be required."
+              );
+            }
+            if (challenge.type !== "proofofwork") {
               this.logger.debug(
                 `Unexpected challenge type: ${error.headers["rblx-challenge-type"]}`
               );
@@ -136,23 +134,16 @@ export class LoginService {
                 `An unexpected challenge type was required: ${error.headers["rblx-challenge-type"]}`
               );
             }
-            const challengeId = error.headers["rblx-challenge-id"];
-            const challengeType = error.headers["rblx-challenge-type"];
-            const challengeMetadata = error.headers["rblx-challenge-metadata"];
-            const { sessionId: challengeSessionId } = JSON.parse(
-              Buffer.from(challengeMetadata, "base64").toString()
-            ) as {
-              sessionId: string;
-            };
+            const { sessionId: challengeSessionId } =
+              this.twoStepApi.decodeChallengeMetadata(challenge.metadata);
             const proofOfWorkPuzzle = await this.getProofOfWorkPuzzle(
               challengeSessionId
             );
             return {
               ok: false,
               error: "proof_of_work_required",
-              challengeId,
-              challengeType,
-              challengeMetadata,
+              challengeId: challenge.id,
+              challengeType: challenge.type,
               challengeSessionId,
               proofOfWorkPuzzle,
             };
@@ -222,30 +213,18 @@ export class LoginService {
     ticket,
     code,
   }: LoginWithTwoStepPayload) {
-    // Step 1. Prepare and send verify code request.
-    const verifyCodeParams = { userId: user.id, mediaType };
-    const verifyCodePayload = {
-      challengeId: ticket,
-      actionType: "Login",
-      code,
-    };
     const { verificationToken } = await this.twoStepApi.verifyCode(
-      verifyCodeParams,
-      verifyCodePayload
+      { userId: user.id, mediaType },
+      {
+        challengeId: ticket,
+        actionType: "Login",
+        code,
+      }
     );
-
-    // Step 2. Prepare and send two-step login request.
-    const twoStepVerificationLoginPayload = {
+    const response = await this.authApi.twoStepVerificationLogin(user.id, {
       challengeId: ticket,
       verificationToken,
-    };
-    // Perhaps we should use a client ID here?
-    const response = await this.authApi.twoStepVerificationLogin(
-      user.id,
-      twoStepVerificationLoginPayload
-    );
-
-    // Step 3. Handle the response.
+    });
     const cookies = response.headers.get("set-cookie");
     if (!cookies) {
       throw new BadRequestException("Something went wrong (1).");

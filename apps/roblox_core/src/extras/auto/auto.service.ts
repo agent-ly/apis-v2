@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
-import { Result } from "errd/result";
 import { BillingApi } from "roblox-proxy-nestjs/apis/billing.api";
 import { PaymentsApi } from "roblox-proxy-nestjs/apis/payments.api";
+import { Result } from "errd";
 
 import { withError } from "../../common/utils.js";
 
