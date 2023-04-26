@@ -3,6 +3,8 @@ import nodeFetch, {
   BodyInit as NodeFetchBodyInit,
   RequestInit as NodeFetchRequestInit,
   Response as NodeFetchResponse,
+  FetchError,
+  AbortError,
 } from "node-fetch";
 
 import { logger } from "./logger.js";
@@ -127,6 +129,16 @@ const fetchWithTimeout = async (
   try {
     const response = await nodeFetch(url, init);
     return response;
+  } catch (error) {
+    if (error instanceof FetchError) {
+      console.dir({
+        type: error.type,
+        code: error.code,
+        errno: error.errno,
+        message: error.message,
+      });
+    }
+    throw error;
   } finally {
     clearTimeout(timeoutId);
   }
