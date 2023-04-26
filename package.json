@@ -3,7 +3,7 @@
     "build": "turbo run build",
     "format:eslint": "eslint --fix --ext .ts,.js .",
     "format:prettier": "prettier --write **/*.{ts,js,json}",
-    "format": "pnpm  format:eslint && pnpm  format:prettier",
+    "format": "pnpm  format:eslint && pnpm format:prettier",
     "pm2:start": "pm2 start process.yml",
     "pm2:stop": "pm2 stop process.yml",
     "pm2:restart": "pm2 restart process.yml",

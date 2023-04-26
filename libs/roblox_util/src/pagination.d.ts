@@ -21,3 +21,7 @@ export type GetPageFn<TData> = (
 export interface AsyncIterablePageCursor<TData> extends AsyncIterable<TData[]> {
   toArray(): Promise<TData[]>;
 }
+
+export function createPageCursor<TData>(
+  getPage: GetPageFn<TData>
+): AsyncIterablePageCursor<TData>;

@@ -1,4 +1,5 @@
 import { Controller, Get, UseFilters, Param, Query } from "@nestjs/common";
+import { createPageCursor } from "roblox-util/pagination";
 import { RobloxExceptionFilter } from "roblox-proxy-nestjs";
 import { InventoryApi } from "roblox-proxy-nestjs/apis/inventory.api";
 import { UsersApi } from "roblox-proxy-nestjs/apis/users.api";
@@ -26,14 +27,10 @@ export class UserController {
 
   @Get(":userId/inventory/all-collectibles")
   async getUserAllCollectibles(@Param("userId") userId: number) {
-    const allCollectibles = [];
-    let cursor = undefined;
-    do {
-      const collectibles =
-        await this.inventoryApi.getUserOwnedCollectibleAssets(userId, cursor);
-      allCollectibles.push(...collectibles.data);
-      cursor = collectibles.nextPageCursor;
-    } while (cursor);
-    return allCollectibles;
+    const cursor = createPageCursor((cursor?: string) =>
+      this.inventoryApi.getUserOwnedCollectibleAssets(userId, cursor)
+    );
+    const collectibles = await cursor.toArray();
+    return collectibles;
   }
 }
