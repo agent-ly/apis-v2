@@ -1,8 +1,10 @@
-import { ApiProperty } from "@nestjs/swagger";
-import { Length } from "class-validator";
+import { createZodDto } from "nestjs-zod";
+import { z } from "nestjs-zod/z";
 
-export class VerifyAuthenticatorPayloadDto {
-  @ApiProperty()
-  @Length(6)
-  code: string;
-}
+const VerifyAuthenticatorPayloadSchema = z.object({
+  code: z.string().min(6),
+});
+
+export class VerifyAuthenticatorPayloadDto extends createZodDto(
+  VerifyAuthenticatorPayloadSchema
+) {}

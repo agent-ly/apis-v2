@@ -2,9 +2,9 @@ import { Injectable, Logger } from "@nestjs/common";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { InjectCollection } from "nestjs-super-mongodb";
 import type { Collection } from "mongodb";
-import { nanoid } from "nanoid";
 
-import { BotItemsService } from "../bots/bot_items.service.js";
+import { generateId } from "../common/util/id.util.js";
+import { BotItemsService } from "../bots/bot_items/bot_items.service.js";
 import { TransactionEvent } from "../wallet/transactions/enums/transaction_event.enum.js";
 import { WalletService } from "../wallet/wallet.service.js";
 import { WagerCurrency } from "./enums/wager_currency.enum.js";
@@ -28,8 +28,8 @@ export class WagersService {
     @InjectCollection(COLLECTION_NAME)
     private readonly collection: Collection<Wager>,
     private readonly eventEmitter: EventEmitter2,
-    private readonly botItemsService: BotItemsService,
-    private readonly walletService: WalletService
+    private readonly walletService: WalletService,
+    private readonly botItemsService: BotItemsService
   ) {}
 
   async findById<TDetails = unknown>(id: string): Promise<Wager<TDetails>> {
@@ -38,7 +38,7 @@ export class WagersService {
   }
 
   async create(payload: CreateWagerPayload) {
-    const id = nanoid();
+    const id = generateId();
     const now = new Date();
     const wager: Partial<Wager> = {
       _id: id,
@@ -54,7 +54,6 @@ export class WagersService {
       createdAt: now,
       updatedAt: now,
     };
-
     if (payload.currency === WagerCurrency.Coins) {
       if (payload.userId !== "house") {
         const transactionId = await this.walletService.subtractBalance({
@@ -74,7 +73,7 @@ export class WagersService {
       await this.collection.insertOne(wager as Wager);
       this.eventEmitter.emit(WAGER_CREATED_EVENT, wager);
       return { wagerId: id };
-    } else if (payload.currency === WagerCurrency.Robux) {
+    } else if (payload.currency === WagerCurrency.Value) {
       const { value, items } = await this.botItemsService.useItems({
         userId: payload.userId,
         itemIds: payload.itemIds,
@@ -120,10 +119,9 @@ export class WagersService {
             game: wager.game,
           },
         });
-      } else if (wager.currency === WagerCurrency.Robux) {
+      } else if (wager.currency === WagerCurrency.Value) {
         const details = wager.details as { itemIds: number[] };
         await this.botItemsService.returnItems(details.itemIds);
-        await this.botItemsService.setItemsClaimable(true, details.itemIds);
         await this.save(wager);
       }
       this.logger.debug(
@@ -152,7 +150,7 @@ export class WagersService {
         ? payload.profit
         : wager.currency === WagerCurrency.Coins
         ? { coins: -wager.amount }
-        : { robux: -wager.amount };
+        : { value: -wager.amount };
     await this.save(wager);
     this.eventEmitter.emit(WAGER_COMPLETED_EVENT, wager);
     this.logger.debug(`Wager ${wager._id} has been completed.`);
@@ -176,20 +174,11 @@ export class WagersService {
           });
         }
         if (payload.feeItemIds) {
-          await this.botItemsService.transferItems(
-            wager.userId,
-            payload.feeItemIds
-          );
-          await this.botItemsService.setItemsFeeable(true, payload.feeItemIds);
-          await this.botItemsService.returnItems(payload.feeItemIds);
+          await this.botItemsService.transferItems("house", payload.feeItemIds);
         }
         if (payload.awardItemIds) {
           await this.botItemsService.transferItems(
             wager.userId,
-            payload.awardItemIds
-          );
-          await this.botItemsService.setItemsClaimable(
-            true,
             payload.awardItemIds
           );
           await this.botItemsService.returnItems(payload.awardItemIds);
@@ -224,7 +213,7 @@ type CreateWagerPayload =
           amount: number;
         }
       | {
-          currency: WagerCurrency.Robux;
+          currency: WagerCurrency.Value;
           itemIds: number[];
         }
     );

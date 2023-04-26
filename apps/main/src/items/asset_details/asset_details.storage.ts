@@ -15,14 +15,14 @@ export class AssetDetailsStorage {
       this.redis.hGetAll("values"),
       this.redis.hGetAll("metadata"),
     ]);
-    const itemDetails = new Map<number, AssetDetails>();
+    const assetDetails = new Map<number, AssetDetails>();
     for (const [assetId, value] of Object.entries(values)) {
-      itemDetails.set(parseInt(assetId, 10), {
+      assetDetails.set(parseInt(assetId, 10), {
         value: parseInt(value, 10),
         metadata: JSON.parse(metadata[assetId] ?? "{}"),
       });
     }
-    return itemDetails;
+    return assetDetails;
   }
 
   async selectValues(assetIds: number[]) {
@@ -44,39 +44,47 @@ export class AssetDetailsStorage {
       this.redis.hmGet("values", strAssetIds),
       this.redis.hmGet("metadata", strAssetIds),
     ]);
-    const itemDetails = new Map<number, AssetDetails>();
+    const assetDetails = new Map<number, AssetDetails>();
     for (let i = 0; i < assetIds.length; i++) {
       if (values[i] === null) {
         continue;
       }
-      itemDetails.set(assetIds[i], {
+      assetDetails.set(assetIds[i], {
         value: parseInt(values[i], 10),
         metadata: JSON.parse(metadata[i] ?? "{}"),
       });
     }
-    return itemDetails;
+    return assetDetails;
   }
 
-  async update(itemDetails: Map<number, AssetDetails>) {
+  async update(assetDetails: Map<number, AssetDetails>) {
     const valueTuples: [string, string][] = [];
     const metadataTuples: [string, string][] = [];
-    for (const [assetId, { value, metadata }] of itemDetails) {
+    for (const [assetId, { value, metadata }] of assetDetails) {
       valueTuples.push([assetId.toString(), value.toString()]);
       metadataTuples.push([assetId.toString(), JSON.stringify(metadata)]);
     }
-    await Promise.all([
-      this.redis.hSet("values", valueTuples),
-      this.redis.hSet("metadata", metadataTuples),
-    ]);
+    const promises: Promise<unknown>[] = [];
+    if (valueTuples.length > 0) {
+      promises.push(this.redis.hSet("values", valueTuples));
+    }
+    if (metadataTuples.length > 0) {
+      promises.push(this.redis.hSet("metadata", metadataTuples));
+    }
+    if (promises.length > 0) {
+      await Promise.all(promises);
+    }
   }
 }
 
-interface AssetDetails {
+export type AssetDetailsMap = Map<number, AssetDetails>;
+
+export interface AssetDetails {
   value: number;
   metadata: AssetDetailsMetadata;
 }
 
-interface AssetDetailsMetadata {
+export interface AssetDetailsMetadata {
   projected?: boolean;
   manualProjected?: boolean;
   rolimonsProjected?: boolean;

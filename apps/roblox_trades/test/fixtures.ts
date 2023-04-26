@@ -58,7 +58,7 @@ export const fixtures = [
           [2, [4]],
         ],
       },
-      error: null,
+      errors: [],
     },
   },
   {
@@ -115,7 +115,7 @@ export const fixtures = [
           [2, [4]],
         ],
       },
-      error: null,
+      errors: [],
     },
   },
   {
@@ -191,7 +191,7 @@ export const fixtures = [
           [2, [9]],
         ],
       },
-      error: null,
+      errors: [],
     },
   },
   {
@@ -267,7 +267,7 @@ export const fixtures = [
           [2, [9]],
         ],
       },
-      error: null,
+      errors: [],
     },
   },
 ];

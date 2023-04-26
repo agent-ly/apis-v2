@@ -3,17 +3,19 @@ import {
   Injectable,
   type OnModuleInit,
 } from "@nestjs/common";
-import { InjectCollection } from "nestjs-super-mongodb";
+import { InjectCollection, InjectMongoConnection } from "nestjs-super-mongodb";
 import type {
   Collection,
   Filter,
+  FindOptions,
+  MongoClient,
   UpdateFilter,
   UpdateResult,
   WithId,
 } from "mongodb";
 
-import { pickBy } from "../../common/util/array.util.js";
-import { toCoins, toRate } from "../../common/util/currency.util.js";
+import { groupAllBy, pickBy } from "../../common/util/array.util.js";
+import { toCoins, toRate } from "../../common/util/format.util.js";
 import type { Item } from "../interfaces/item.interface.js";
 import { DbItemType } from "./enums/db_item_type.enum.js";
 import { DbItem, BotDbItem, ShopDbItem } from "./db_item.entity.js";
@@ -34,14 +36,24 @@ export class DbItemsService implements OnModuleInit {
   }
 
   constructor(
+    @InjectMongoConnection()
+    private readonly client: MongoClient,
     @InjectCollection(COLLECTION_NAME)
     private readonly collection: Collection<DbItem>
   ) {}
 
   async onModuleInit() {
-    await this.collection.createIndex({ type: 1, _id: 1 });
-    await this.collection.createIndex({ type: 1, userId: 1 });
-    await this.collection.createIndex({ type: 1, userId: 1, _id: 1 });
+    await this.collection.createIndexes([
+      { key: { type: 1, _id: 1 } },
+      { key: { type: 1, userId: 1 } },
+      { key: { type: 1, userId: 1, _id: 1 } },
+      { key: { _id: 1, available: 1 } },
+      { key: { _id: 1, available: 1, updatedAt: 1 } },
+    ]);
+  }
+
+  getCollection() {
+    return this.collection;
   }
 
   createMany(items: DbItem[]) {
@@ -54,6 +66,24 @@ export class DbItemsService implements OnModuleInit {
 
   findManyById(itemIds: number[]) {
     return this.collection.find({ _id: { $in: itemIds } }).toArray();
+  }
+
+  updateOneByType(
+    type: DbItemType.Bot,
+    filter: Filter<BotDbItem>,
+    update: UpdateFilter<BotDbItem>
+  ): Promise<UpdateResult>;
+  updateOneByType(
+    type: DbItemType.Shop,
+    filter: Filter<ShopDbItem>,
+    update: UpdateFilter<ShopDbItem>
+  ): Promise<UpdateResult>;
+  updateOneByType(
+    type: DbItemType,
+    filter: Filter<DbItem>,
+    update: UpdateFilter<DbItem>
+  ): Promise<UpdateResult> {
+    return this.collection.updateOne({ type, ...filter }, update);
   }
 
   updateManyById(
@@ -80,17 +110,20 @@ export class DbItemsService implements OnModuleInit {
 
   findManyByType(
     type: DbItemType.Bot,
-    filter: Filter<BotDbItem>
+    filter: Filter<BotDbItem>,
+    options?: FindOptions<BotDbItem>
   ): Promise<WithId<BotDbItem>[]>;
   findManyByType(
     type: DbItemType.Shop,
-    filter: Filter<ShopDbItem>
+    filter: Filter<ShopDbItem>,
+    options?: FindOptions<ShopDbItem>
   ): Promise<WithId<ShopDbItem>[]>;
   findManyByType(
     type: DbItemType,
-    filter: Filter<DbItem>
+    filter: Filter<DbItem>,
+    options?: FindOptions<DbItem>
   ): Promise<WithId<DbItem>[]> {
-    return this.collection.find({ type, ...filter }).toArray();
+    return this.collection.find({ type, ...filter }, options).toArray();
   }
 
   updateManyByType(
@@ -117,11 +150,31 @@ export class DbItemsService implements OnModuleInit {
     );
   }
 
-  setItemsAvailable(available: boolean, itemIds: number[]) {
-    return this.collection.updateMany(
-      { _id: { $in: itemIds } },
-      { $set: { available }, $currentDate: { updatedAt: true } }
-    );
+  async setItemsAvailable(available: boolean, itemIds: number[]) {
+    const updatedAt = new Date();
+    const updatedItemIds: number[] = [];
+    for (const itemId of itemIds) {
+      const { modifiedCount } = await this.collection.updateOne(
+        { _id: itemId, available: !available },
+        { $set: { available, updatedAt } }
+      );
+      if (modifiedCount === 1) {
+        updatedItemIds.push(itemId);
+      } else {
+        const newUpdatedAt = new Date();
+        await this.collection.updateMany(
+          { _id: { $in: updatedItemIds }, available, updatedAt },
+          { $set: { available: !available, updatedAt: newUpdatedAt } }
+        );
+        if (available === false) {
+          throw new BadRequestException({
+            error: "item_not_available",
+            message: "An item is not available.",
+            details: { itemId },
+          });
+        }
+      }
+    }
   }
 
   areItemsAvailable(itemIds: number[], items: DbItem[]) {
@@ -131,24 +184,22 @@ export class DbItemsService implements OnModuleInit {
         message: "No items were found.",
       });
     }
-    if (items.length !== itemIds.length) {
-      const missingItemIds = itemIds.filter(
-        (itemId) => !items.some((item) => item._id === itemId)
-      );
-      throw new BadRequestException({
-        error: "items_not_found",
-        message: "Some items were not found.",
-        details: { itemIds: missingItemIds },
-      });
-    }
-    const unavailable = items.filter((item) => !item.available);
-    if (unavailable.length > 0) {
-      const unavailableItemIds = pickBy(unavailable, "_id");
-      throw new BadRequestException({
-        error: "items_unavailable",
-        message: "Some items are not available.",
-        details: { itemIds: unavailableItemIds },
-      });
+    const itemsById = groupAllBy(items, "_id");
+    for (const [itemId, [item]] of itemsById) {
+      if (!itemIds.includes(itemId)) {
+        throw new BadRequestException({
+          error: "item_not_found",
+          message: "An item was not found.",
+          details: { itemId },
+        });
+      }
+      if (!item.available) {
+        throw new BadRequestException({
+          error: "item_not_available",
+          message: "An item is not available.",
+          details: { itemId },
+        });
+      }
     }
   }
 
@@ -206,7 +257,7 @@ export class DbItemsService implements OnModuleInit {
       const shopItem: ShopDbItem = {
         ...this.prepareItem(payload.userId, item),
         type: DbItemType.Shop,
-        sellerId: payload.sellerId,
+        robloUserId: payload.robloUserId,
         rate,
         price,
         details: null,
@@ -242,7 +293,7 @@ interface CreateBotItemsPayload extends CreateDbItemsPayload {
 }
 
 interface CreateShopItemsPayload extends CreateDbItemsPayload {
-  sellerId: number;
+  robloUserId: number;
   rate?: number;
   rates?: Map<number, number>;
 }

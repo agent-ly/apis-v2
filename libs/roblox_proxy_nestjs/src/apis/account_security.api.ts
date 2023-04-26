@@ -1,3 +1,4 @@
+import { Injectable } from "@nestjs/common";
 import { RobloxClient } from "../roblox.client.js";
 
 export enum SecurityQuestionsError {
@@ -34,18 +35,22 @@ export interface AnswerQuestionResponse {
   userWasForceReset?: boolean;
 }
 
+@Injectable()
 export class AccountSecurityApi {
   constructor(private readonly client: RobloxClient) {}
 
-  getQuestion(params: GetQuestionQuery): Promise<GetQuestionResponse> {
-    const url = `https://apis.roblox.com/account-security-service/v1/security-question?userId=${params.userId}&sessionId=${params.sessionId}`;
-    return this.client.json<GetQuestionResponse>(url);
+  getQuestion({
+    userId,
+    sessionId,
+  }: GetQuestionQuery): Promise<GetQuestionResponse> {
+    const url = `https://apis.roblox.com/account-security-service/v1/security-question?userId=${userId}&sessionId=${sessionId}`;
+    return this.client.json(url);
   }
 
   answerQuestion(data: AnswerQuestionPayload): Promise<AnswerQuestionResponse> {
     const url =
       "https://apis.roblox.com/account-security-service/v1/security-question";
     const init = { method: "POST", data };
-    return this.client.json<AnswerQuestionResponse>(url, init);
+    return this.client.json(url, init);
   }
 }

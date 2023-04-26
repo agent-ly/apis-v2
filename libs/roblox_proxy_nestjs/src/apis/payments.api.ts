@@ -3,6 +3,12 @@ import { Injectable } from "@nestjs/common";
 import { RobloxErrorHost } from "../roblox.error-host.js";
 import { RobloxClient } from "../roblox.client.js";
 
+export interface RedeemGiftCardPayload {
+  pinCode: string;
+  captchaId?: string;
+  captchaToken?: string;
+}
+
 type RedeemGiftCardResponse =
   | {
       errors: unknown[];
@@ -12,12 +18,6 @@ type RedeemGiftCardResponse =
       errors: null;
       redemptionResult: unknown;
     };
-
-export interface RedeemGiftCardPayload {
-  pinCode: string;
-  captchaId?: string;
-  captchaToken?: string;
-}
 
 @Injectable()
 export class PaymentsApi {

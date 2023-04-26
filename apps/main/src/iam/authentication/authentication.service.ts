@@ -10,7 +10,6 @@ import {
 import type { ConfigType } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { MongoServerError } from "mongodb";
-import { nanoid } from "nanoid";
 
 import { UserSettingsService } from "../../users/user_settings/user_settings.service.js";
 import { User } from "../../users/user.entity.js";
@@ -24,10 +23,10 @@ import { RefreshTokenIdsStorage } from "./storages/refresh_token_ids.storage.js"
 import { RegisterPayloadDto } from "./dto/register_payload.dto.js";
 import { LoginPayloadDto } from "./dto/login_payload.dto.js";
 import { RefreshPayloadDto } from "./dto/refresh_payload.dto.js";
-import { SetupAuthentictorPayloadDto } from "./dto/setup_authenticator_payload.dto.js";
+import { AttachPayloadDto } from "./dto/attach_payload.dto.js";
+import { SetupAuthenticatorPayloadDto } from "./dto/setup_authenticator_payload.dto.js";
 import { VerifyAuthenticatorPayloadDto } from "./dto/verify_authenticator_payload.dto.js";
 import { RemoveAuthenticatorPayloadDto } from "./dto/remove_authenticator._payload.dto.js";
-import { AttachPayloadDto } from "./dto/attach_payload.dto.js";
 
 @Injectable()
 export class AuthenticationService {
@@ -45,7 +44,7 @@ export class AuthenticationService {
 
   async register(payload: RegisterPayloadDto) {
     try {
-      const password = nanoid();
+      const password = randomUUID();
       const user = await this.usersService.insert(payload.username);
       const hashed = await this.hashingService.hash(password);
       await this.userSettingsService.create(user._id, hashed);
@@ -77,7 +76,7 @@ export class AuthenticationService {
   async refresh(payload: RefreshPayloadDto) {
     const { sub, refreshTokenId } = await this.jwtService.verifyAsync<
       Pick<ActiveUserData, "sub"> & { refreshTokenId: string }
-    >(payload.token);
+    >(payload.refreshToken);
     const user = await this.usersService.findByIdOrThrow(sub);
     const isValid = await this.refreshTokenIdsStorage.validate(
       user._id,
@@ -94,7 +93,7 @@ export class AuthenticationService {
 
   async setupAuthenticator(
     userId: string,
-    payload: SetupAuthentictorPayloadDto
+    payload: SetupAuthenticatorPayloadDto
   ) {
     const user = await this.usersService.findByIdOrThrow(userId);
     const settings = await this.userSettingsService.findByIdOrThrow(userId);

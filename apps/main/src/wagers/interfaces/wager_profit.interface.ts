@@ -1,6 +1,6 @@
 export interface WagerProfit {
   coins?: number;
   coinsFee?: number;
-  robux?: number;
-  robuxFee?: number;
+  value?: number;
+  valueFee?: number;
 }

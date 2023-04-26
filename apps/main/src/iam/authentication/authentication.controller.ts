@@ -7,7 +7,7 @@ import { RegisterPayloadDto } from "./dto/register_payload.dto.js";
 import { LoginPayloadDto } from "./dto/login_payload.dto.js";
 import { RefreshPayloadDto } from "./dto/refresh_payload.dto.js";
 import { AttachPayloadDto } from "./dto/attach_payload.dto.js";
-import { SetupAuthentictorPayloadDto } from "./dto/setup_authenticator_payload.dto.js";
+import { SetupAuthenticatorPayloadDto } from "./dto/setup_authenticator_payload.dto.js";
 import { VerifyAuthenticatorPayloadDto } from "./dto/verify_authenticator_payload.dto.js";
 import { RemoveAuthenticatorPayloadDto } from "./dto/remove_authenticator._payload.dto.js";
 import { AuthenticationService } from "./authentication.service.js";
@@ -21,38 +21,38 @@ export class AuthenticationController {
     return this.authenticationService.register(payload);
   }
 
-  @HttpCode(HttpStatus.OK)
   @Post("login")
+  @HttpCode(HttpStatus.OK)
   login(@Body() payload: LoginPayloadDto) {
     return this.authenticationService.login(payload);
   }
 
+  @Post("refresh")
   @Auth(AuthStrategy.Bearer)
   @HttpCode(HttpStatus.OK)
-  @Post("refresh")
   refresh(@Body() payload: RefreshPayloadDto) {
     return this.authenticationService.refresh(payload);
   }
 
+  @Post("attach")
   @Auth(AuthStrategy.Bearer)
   @HttpCode(HttpStatus.OK)
-  @Post("attach")
   attach(@Body() payload: AttachPayloadDto) {
     return this.authenticationService.attach(payload);
   }
 
-  @Auth(AuthStrategy.Bearer)
   @Post("security/authenticator/setup")
+  @Auth(AuthStrategy.Bearer)
   setupAuthenticator(
     @ActiveUserId() userId: string,
-    @Body() payload: SetupAuthentictorPayloadDto
+    @Body() payload: SetupAuthenticatorPayloadDto
   ) {
     return this.authenticationService.setupAuthenticator(userId, payload);
   }
 
+  @Post("security/authenticator/verify")
   @Auth(AuthStrategy.Bearer)
   @HttpCode(HttpStatus.OK)
-  @Post("security/authenticator/verify")
   verifyAuthenticator(
     @ActiveUserId() userId: string,
     @Body() payload: VerifyAuthenticatorPayloadDto
@@ -60,9 +60,9 @@ export class AuthenticationController {
     return this.authenticationService.verifyAuthenticator(userId, payload);
   }
 
+  @Post("security/authenticator/remove")
   @Auth(AuthStrategy.Bearer)
   @HttpCode(HttpStatus.OK)
-  @Post("security/authenticator/remove")
   removeAuthenticator(
     @ActiveUserId() userId: string,
     @Body() payload: RemoveAuthenticatorPayloadDto

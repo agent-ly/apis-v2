@@ -20,7 +20,7 @@ export interface BotDbItem extends DbItem {
 
 export interface ShopDbItem extends DbItem {
   type: DbItemType.Shop;
-  sellerId: number;
+  robloUserId: number;
   rate: number;
   price: number;
 }

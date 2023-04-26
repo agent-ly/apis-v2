@@ -1,8 +1,10 @@
-import { ApiProperty } from "@nestjs/swagger";
-import { IsNotEmpty } from "class-validator";
+import { createZodDto } from "nestjs-zod";
+import { z } from "nestjs-zod/z";
 
-export class SetupAuthentictorPayloadDto {
-  @ApiProperty()
-  @IsNotEmpty()
-  password: string;
-}
+const SetupAuthenticatorPayloadSchema = z.object({
+  password: z.string().min(8).max(64),
+});
+
+export class SetupAuthenticatorPayloadDto extends createZodDto(
+  SetupAuthenticatorPayloadSchema
+) {}

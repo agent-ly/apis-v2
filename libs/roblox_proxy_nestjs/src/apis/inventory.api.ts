@@ -11,22 +11,61 @@ export interface Collectible {
   recentAveragePrice: number;
 }
 
-export type GetCollectibleUserAssetsResponse = PageResponse<Collectible>;
+export type GetUserOwnedCollectiblesResponse = PageResponse<Collectible>;
+
+export interface CanViewInventorResponse {
+  canView: boolean;
+}
+
+export type ItemType = "Asset" | "Gamepass" | "Badge" | "Bundle";
+
+export interface Item {
+  type: ItemType;
+  id: number;
+  name: string;
+  instanceId: number;
+}
+
+export type GetUserOwnedItemsOfTypeResponse = PageResponse<Item>;
 
 @Injectable()
 export class InventoryApi {
   constructor(private readonly client: RobloxClient) {}
 
-  getCollectibleUserAssets(
+  getUserOwnedCollectibleAssets(
     userId: number,
-    cursor?: string,
-    roblosecurity?: string
-  ): Promise<GetCollectibleUserAssetsResponse> {
-    let baseUrl = `https://inventory.roblox.com/v1/users/${userId}/assets/collectibles?sortOrder=Asc&limit=100`;
+    cursor?: string
+  ): Promise<GetUserOwnedCollectiblesResponse> {
+    let url = `https://inventory.roblox.com/v1/users/${userId}/assets/collectibles?sortOrder=Asc&limit=100`;
     if (cursor) {
-      baseUrl += `&cursor=${cursor}`;
+      url += `&cursor=${cursor}`;
     }
-    const init = { roblosecurity };
-    return this.client.json<GetCollectibleUserAssetsResponse>(baseUrl, init);
+    return this.client.json(url);
+  }
+
+  canViewInventory(userId: number): Promise<CanViewInventorResponse> {
+    return this.client.json(
+      `https://inventory.roblox.com/v1/users/${userId}/can-view-inventory`
+    );
+  }
+
+  getUserOwnedItemsOfType(
+    userId: number,
+    itemType: ItemType,
+    itemTargetId: number
+  ): Promise<GetUserOwnedItemsOfTypeResponse> {
+    return this.client.json(
+      `https://inventory.roblox.com/v1/users/${userId}/items/${itemType}/${itemTargetId}`
+    );
+  }
+
+  userOwnsItemsOfType(
+    userId: number,
+    itemType: ItemType,
+    itemTargetId: number
+  ): Promise<boolean> {
+    return this.client.json(
+      `https://inventory.roblox.com/v1/users/${userId}/items/${itemType}/${itemTargetId}/is-owned`
+    );
   }
 }

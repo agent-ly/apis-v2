@@ -9,6 +9,8 @@ export class KycError extends Error {
     }
   }
 
+  public readonly statusCode = 400;
+
   constructor() {
     super(KycError.MESSAGE);
     this.name = "KycError";

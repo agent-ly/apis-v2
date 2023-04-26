@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { RequestOptions } from "roblox-proxy-core/client";
+import type { RequestConfig } from "roblox-proxy-core/types";
 
 import { RobloxClient } from "../roblox.client.js";
 
@@ -66,10 +66,7 @@ export interface SignupPayload {
 export class AuthApi {
   constructor(private readonly client: RobloxClient) {}
 
-  signup(
-    data: SignupPayload,
-    config?: RequestOptions["config"]
-  ): Promise<Response> {
+  signup(data: SignupPayload, config?: RequestConfig): Promise<Response> {
     const url = "https://auth.roblox.com/v2/signup";
     const init = { method: "POST", data };
     return this.client.request(url, init, config);
@@ -77,7 +74,7 @@ export class AuthApi {
 
   login(
     data: LoginPayload,
-    config?: RequestOptions["config"],
+    config?: RequestConfig,
     headers?: Record<string, any>
   ): Promise<Response> {
     const url = "https://auth.roblox.com/v2/login";
@@ -88,7 +85,7 @@ export class AuthApi {
   twoStepVerificationLogin(
     userId: number,
     data: TwoStepVerificationLoginPayload,
-    config?: RequestOptions["config"]
+    config?: RequestConfig
   ): Promise<Response> {
     const url = `https://auth.roblox.com/v3/users/${userId}/two-step-verification/login`;
     const init = { method: "POST", data };

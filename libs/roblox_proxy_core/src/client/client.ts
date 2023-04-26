@@ -4,7 +4,6 @@ import {
   type ClientRequestInit,
   type ClientRequestConfig,
 } from "../types.js";
-import { UrlWithParamsBuilder } from "./builders/url_with_params.js";
 import { ProxyRequestBuilder } from "./builders/proxy_request.js";
 import {
   DEFAULT_HEADERS,
@@ -20,17 +19,13 @@ export interface RequestOptions {
 
 export async function request(url: string, options: RequestOptions = {}) {
   const proxyRequest = new ProxyRequestBuilder();
-
+  proxyRequest.url(url);
   if (!options?.init) {
     options.init = {};
   }
   options.init.method = options.init.method ?? DEFAULT_METHOD;
   options.init.headers = { ...DEFAULT_HEADERS, ...options.init.headers };
   if (options?.init) {
-    if (options.init.params) {
-      url = new UrlWithParamsBuilder(url).params(options.init.params).build();
-    }
-    proxyRequest.url(url);
     if (options.init.method) {
       proxyRequest.method(options.init.method);
     }
@@ -74,7 +69,6 @@ export async function request(url: string, options: RequestOptions = {}) {
       proxyRequest.proxyLocation(options.config.proxyLocation);
     }
   }
-
   const request = proxyRequest.build();
   const response = await fetch(request);
   return response;

@@ -7,7 +7,7 @@ import {
   type LoginWithTwoStepPayload,
 } from "./login.service.js";
 
-@Controller("login")
+@Controller("auth/login")
 @UseFilters(RobloxExceptionFilter)
 export class LoginController {
   constructor(private readonly loginService: LoginService) {}

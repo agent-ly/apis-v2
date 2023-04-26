@@ -2,7 +2,6 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-  type OnModuleInit,
 } from "@nestjs/common";
 import { EventEmitter2, OnEvent } from "@nestjs/event-emitter";
 import { InjectCollection } from "nestjs-super-mongodb";
@@ -11,7 +10,6 @@ import {
   DocumentLockAcquisitionError,
   withDocumentLock,
 } from "mongodb-super-util/document_lock";
-import { nanoid } from "nanoid";
 
 import type { User } from "../users/user.entity.js";
 import { USER_CREATED_EVENT } from "../users/users.constants.js";
@@ -30,7 +28,7 @@ import { Wallet } from "./wallet.entity.js";
 import { COLLECTION_NAME } from "./wallet.constants.js";
 
 @Injectable()
-export class WalletService implements OnModuleInit {
+export class WalletService {
   constructor(
     @InjectCollection(COLLECTION_NAME)
     private readonly collection: Collection<Wallet>,
@@ -38,20 +36,10 @@ export class WalletService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2
   ) {}
 
-  async onModuleInit() {
-    await this.collection.createIndexes([
-      { key: { userId: 1 }, unique: true },
-      { key: { userId: 1, balance: 1 } },
-      { key: { userId: 1, enabled: 1, balance: 1 } },
-    ]);
-  }
-
-  async insert(userId: string) {
-    const id = nanoid();
+  async create(userId: string): Promise<void> {
     const now = new Date();
     const wallet: Wallet = {
-      _id: id,
-      userId,
+      _id: userId,
       enabled: true,
       verified: false,
       balance: 0,
@@ -66,125 +54,108 @@ export class WalletService implements OnModuleInit {
       updatedAt: now,
     };
     await this.collection.insertOne(wallet);
-    return id;
   }
 
-  findById(userId: string) {
-    return this.collection.findOne({ userId });
+  findById(walletId: string): Promise<Wallet | null> {
+    return this.collection.findOne({ _id: walletId });
   }
 
-  async findByIdOrThrow(userId: string) {
-    const wallet = await this.collection.findOne({ userId });
+  async findByIdOrThrow(walletId: string): Promise<Wallet> {
+    const wallet = await this.collection.findOne({ _id: walletId });
     if (!wallet) {
       throw new NotFoundException("Wallet not found.");
     }
     return wallet;
   }
 
-  async withdraw(userId: string, payload: WithdrawPayloadDto) {
+  async withdraw(userId: string, payload: WithdrawPayloadDto): Promise<void> {
     await this.subtractBalance({
       userId,
-      amount: payload.amount,
       event: TransactionEvent.Wallet_Withdraw,
+      amount: payload.amount,
       details: { address: payload.address },
+    });
+    // Withdraw from bitcoin wallet
+  }
+
+  async hasBalance(userId: string, amount: number): Promise<boolean> {
+    const wallet = await this.findByIdOrThrow(userId);
+    if (amount > wallet.balance) {
+      throw new BalanceInsufficientError();
+    }
+    return true;
+  }
+
+  addBalance(payload: ModifyBalancePayload): Promise<string> {
+    AmountZeroError.assert(payload.amount);
+    AmountInvalidError.assertPositive(payload.amount);
+    return this.modifyBalance({
+      type: TransactionType.Deposit,
+      ...payload,
     });
   }
 
-  async addBalance(payload: ModifyBalancePayload) {
-    AmountZeroError.assert(payload.amount);
-    AmountInvalidError.assertPositive(payload.amount);
-    const filter: Filter<Wallet> = { userId: payload.userId };
-    const update: UpdateFilter<Wallet> = {};
-    update.$inc = { amount: payload.amount };
-    update.$currentDate = { updatedAt: true };
-    switch (payload.event) {
-      case TransactionEvent.Wallet_Deposit:
-        update.$inc = {
-          ...update.$inc,
-          deposited: payload.amount,
-        };
-        break;
-
-      case TransactionEvent.Wager_Cancel:
-      case TransactionEvent.Wager_Won:
-        update.$inc = {
-          ...update.$inc,
-          [payload.event === TransactionEvent.Wager_Won ? "won" : "wagered"]:
-            TransactionEvent.Wager_Won ? payload.amount : -payload.amount,
-        };
-        break;
-
-      case TransactionEvent.Shop_Sold:
-      case TransactionEvent.Shop_Refund:
-        update.$inc = {
-          ...update.$inc,
-          sold:
-            payload.event === TransactionEvent.Shop_Sold
-              ? payload.amount
-              : -payload.amount,
-        };
-        break;
-    }
-    return this.modifyBalance(filter, update, TransactionType.Deposit, payload);
-  }
-
-  async subtractBalance(payload: ModifyBalancePayload) {
+  async subtractBalance(payload: ModifyBalancePayload): Promise<string> {
     AmountZeroError.assert(payload.amount);
     AmountInvalidError.assertNegative(payload.amount);
     const wallet = await this.findByIdOrThrow(payload.userId);
     BalanceLockedError.assert(wallet.enabled);
     BalanceInsufficientError.assert(payload.amount, wallet.balance);
-    const filter: Filter<Wallet> = {
-      userId: payload.userId,
-      enabled: true,
-      balance: { $gte: -payload.amount },
-    };
     if (payload.event === TransactionEvent.Wallet_Withdraw) {
       AmlError.assert(wallet.wagered, wallet.deposited);
       KycError.assert(wallet.verified, wallet.withdrawn);
     }
-    const update: UpdateFilter<Wallet> = {
-      $inc: { amount: payload.amount },
-      $currentDate: { updatedAt: true },
-    };
-    switch (payload.event) {
-      case TransactionEvent.Wallet_Withdraw:
-        update.$inc = { ...update.$inc, withdrawn: payload.amount };
-        break;
-
-      case TransactionEvent.Wager_Create:
-        update.$inc = { ...update.$inc, wagered: payload.amount };
-        break;
-
-      case TransactionEvent.Shop_Buy:
-        update.$inc = { ...update.$inc, bought: payload.amount };
-        break;
-    }
     try {
-      return await withDocumentLock(this.collection, wallet, () =>
-        this.modifyBalance(filter, update, TransactionType.Withdraw, payload)
+      const transactionId = await withDocumentLock(
+        this.collection,
+        wallet,
+        () =>
+          this.modifyBalance({
+            type: TransactionType.Withdraw,
+            ...payload,
+          })
       );
+      return transactionId;
     } catch (error) {
       if (error instanceof DocumentLockAcquisitionError) {
-        throw new BadRequestException("Another transaction is in progress.");
+        throw new BadRequestException({
+          message: "Another transaction is in progress.",
+        });
       }
       throw error;
     }
   }
 
-  async modifyBalance(
-    filter: Filter<Wallet>,
-    update: UpdateFilter<Wallet>,
-    type: TransactionType,
-    payload: ModifyBalancePayload
-  ) {
+  async modifyBalance(payload: InternalModifyBalancePayload): Promise<string> {
+    const filter: Filter<Wallet> = { _id: payload.userId };
+    const update: UpdateFilter<Wallet> = {
+      $inc: { balance: payload.amount },
+      $currentDate: { updatedAt: true },
+    };
     const result = await this.collection.findOneAndUpdate(filter, update);
     if (!result.value) {
       throw new NotFoundException("Wallet not found.");
     }
+    if (payload.type === TransactionType.Withdraw) {
+      // ? We could use Math.abs() here, but there should never be a case where the amount is positive.
+      const inverseAmount = -payload.amount;
+      let error = !result.value.enabled
+        ? new BalanceLockedError()
+        : result.value.balance < inverseAmount
+        ? new BalanceInsufficientError()
+        : null;
+      if (error) {
+        const reversion: UpdateFilter<Wallet> = {
+          $inc: { balance: inverseAmount },
+          $currentDate: { updatedAt: true },
+        };
+        await this.collection.updateOne(filter, reversion);
+        throw error;
+      }
+    }
     const transactionId = await this.transactionsService.create({
       userId: payload.userId,
-      type,
+      type: payload.type,
       event: payload.event,
       amount: payload.amount,
       previousBalance: result.value.balance,
@@ -193,14 +164,63 @@ export class WalletService implements OnModuleInit {
     });
     this.eventEmitter.emit(
       WalletBalanceModifiedEvent.EVENT,
-      new WalletBalanceModifiedEvent(payload.userId, payload.amount)
+      new WalletBalanceModifiedEvent({
+        userId: payload.userId,
+        event: payload.event,
+        amount: payload.amount,
+      })
     );
     return transactionId;
   }
 
+  @OnEvent(WalletBalanceModifiedEvent.EVENT)
+  async onUserBalanceModified({
+    userId,
+    event,
+    amount,
+  }: WalletBalanceModifiedEvent): Promise<void> {
+    const filter: Filter<Wallet> = { userId };
+    const update: UpdateFilter<Wallet> = {};
+    switch (event) {
+      case TransactionEvent.Wallet_Withdraw:
+        update.$inc = { ...update.$inc, withdrawn: amount };
+        break;
+      case TransactionEvent.Wallet_Deposit:
+        update.$inc = {
+          ...update.$inc,
+          deposited: amount,
+        };
+        break;
+
+      case TransactionEvent.Wager_Create:
+        update.$inc = { ...update.$inc, wagered: amount };
+        break;
+      case TransactionEvent.Wager_Cancel:
+      case TransactionEvent.Wager_Won:
+        update.$inc = {
+          ...update.$inc,
+          [event === TransactionEvent.Wager_Won ? "won" : "wagered"]:
+            TransactionEvent.Wager_Won ? amount : -amount,
+        };
+        break;
+
+      case TransactionEvent.Shop_Buy:
+        update.$inc = { ...update.$inc, bought: amount };
+        break;
+      case TransactionEvent.Shop_Sold:
+      case TransactionEvent.Shop_Refund:
+        update.$inc = {
+          ...update.$inc,
+          sold: event === TransactionEvent.Shop_Sold ? amount : -amount,
+        };
+        break;
+    }
+    await this.collection.updateOne(filter, update);
+  }
+
   @OnEvent(USER_CREATED_EVENT)
-  async onUserCreated(user: User) {
-    await this.insert(user._id);
+  async onUserCreated(user: User): Promise<void> {
+    await this.create(user._id);
   }
 }
 
@@ -209,4 +229,8 @@ interface ModifyBalancePayload {
   event: TransactionEvent;
   amount: number;
   details?: unknown;
+}
+
+interface InternalModifyBalancePayload extends ModifyBalancePayload {
+  type: TransactionType;
 }

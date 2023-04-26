@@ -9,6 +9,6 @@ export class PremiumFeaturesApi {
   isPremium(roblosecurity: string, userId: number): Promise<boolean> {
     const url = `https://premiumfeatures.roblox.com/v1/users/${userId}/validate-membership`;
     const init = { roblosecurity };
-    return this.client.json<boolean>(url, init);
+    return this.client.json(url, init);
   }
 }

@@ -2,26 +2,29 @@ import { Injectable, Logger } from "@nestjs/common";
 import { EventEmitter2, OnEvent } from "@nestjs/event-emitter";
 import { InjectCollection } from "nestjs-super-mongodb";
 import type { Collection } from "mongodb";
-import { nanoid } from "nanoid";
 
+import { generateId } from "../../common/util/id.util.js";
+import { pickBy } from "../../common/util/array.util.js";
 import { CryptService } from "../../crypt/crypt.service.js";
 import {
-  type AddMultiTradePayload,
-  AddMultiTradeStrategy,
+  type StartMultiTradePayload,
+  StartMultiTradeStrategy,
   type MultiTradeResult,
   MultiTradeStatus,
-} from "../../roblox/roblox.interfaces.js";
-import { MULTI_TRADE_PROCESSED_EVENT } from "../../roblox/roblox.constants.js";
-import { RobloxService } from "../../roblox/roblox.service.js";
+  type StartMultiTradeUser,
+} from "../../roblox/roblox_trades/roblox_trades.interfaces.js";
+import { MultiTradeProcessedEvent } from "../../roblox/roblox_trades/events/multi_trade_processed.event.js";
+import { RobloxTradesService } from "../../roblox/roblox_trades/roblox_trades.service.js";
 import { ItemTransactionEvent } from "./enums/item_transaction_event.enum.js";
 import { ItemTransactionType } from "./enums/item_transaction_type.enum.js";
 import { ItemTransactionStatus } from "./enums/item_transaction_status.enum.js";
 import { ItemTransactionProcessedEvent } from "./events/item_transaction_processed.event.js";
-import { ItemTransaction } from "./item_transaction.entity.js";
 import {
-  COLLECTION_NAME,
-  ITEM_TRANSACTION_PROCESSED_EVENT,
-} from "./item_transactions.constants.js";
+  DepositItemTransaction,
+  ItemTransaction,
+  WithdrawItemTransaction,
+} from "./item_transaction.entity.js";
+import { COLLECTION_NAME } from "./item_transactions.constants.js";
 
 @Injectable()
 export class ItemTransactionsService {
@@ -32,121 +35,163 @@ export class ItemTransactionsService {
     private readonly collection: Collection<ItemTransaction>,
     private readonly eventEmitter: EventEmitter2,
     private readonly cryptService: CryptService,
-    private readonly robloxService: RobloxService
+    private readonly robloxTradesService: RobloxTradesService
   ) {}
 
   async onModuleInit() {
     await this.collection.createIndex({ jobId: 1 });
   }
 
-  create(payload: CreateItemTransactionPayload) {
-    const strategy =
-      payload.event === ItemTransactionEvent.Bot_Withdraw ||
-      payload.event === ItemTransactionEvent.Shop_Withdraw
-        ? AddMultiTradeStrategy.Receiver_To_Sender
-        : AddMultiTradeStrategy.Sender_To_Receiver;
-    // TODO: Calculate based on # of smalls
+  prepareData(
+    event: ItemTransactionEvent,
+    receiver: StartMultiTradePayload["receiver"],
+    senders: StartMultiTradePayload["senders"]
+  ) {
     const maxItemsPerTrade = 3;
+    const strategy =
+      event === ItemTransactionEvent.Bot_Withdraw ||
+      event === ItemTransactionEvent.Shop_Withdraw
+        ? StartMultiTradeStrategy.Receiver_To_Sender
+        : StartMultiTradeStrategy.Sender_To_Receiver;
     const data = {
       maxItemsPerTrade,
       strategy,
-      sender: payload.sender,
-      receiver: payload.receiver,
+      receiver,
+      senders,
     };
     const encoded = this.cryptService.encode(data);
     const encrypted = this.cryptService.encrypt(encoded);
-    const id = nanoid();
+    return encrypted;
+  }
+
+  prepareDeposit(payload: CreateDepositTransactionPayload) {
+    const data = this.prepareData(payload.event, payload.receiver, [
+      payload.sender,
+    ]);
+    const id = generateId();
     const now = new Date();
-    const itemTransaction: ItemTransaction = {
+    const deposit: DepositItemTransaction = {
       _id: id,
       jobId: null,
       userId: payload.userId,
-      senderId: payload.sender.id,
-      receiverId: payload.receiver.id,
-      type: payload.type,
+      robloUserId: payload.sender.id,
+      robloReceiverId: payload.receiver.id,
+      type: ItemTransactionType.Deposit,
       event: payload.event,
       status: ItemTransactionStatus.Pending,
-      data: encrypted,
+      data,
       details: payload.details ?? null,
       createdAt: now,
       updatedAt: now,
     };
-    this.logger.debug(`Created Item Transaction ${id}.`);
-    return itemTransaction;
+    return deposit;
   }
 
-  add(itemTransaction: ItemTransaction) {
-    return this.collection.insertOne(itemTransaction);
+  prepareWithdraw(payload: CreateWithdrawTransactionPayload) {
+    const data = this.prepareData(
+      payload.event,
+      payload.receiver,
+      payload.senders
+    );
+    const id = generateId();
+    const now = new Date();
+    const withdraw: WithdrawItemTransaction = {
+      _id: id,
+      jobId: null,
+      userId: payload.userId,
+      robloUserId: payload.receiver.id,
+      robloSenderIds: pickBy(payload.senders, "id"),
+      type: ItemTransactionType.Withdraw,
+      event: payload.event,
+      status: ItemTransactionStatus.Pending,
+      data,
+      details: payload.details ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    return withdraw;
   }
 
-  async activate(itemTransaction: ItemTransaction) {
-    if (itemTransaction.data === null) {
+  add(transaction: ItemTransaction) {
+    return this.collection.insertOne(transaction);
+  }
+
+  async activate(transaction: ItemTransaction) {
+    if (transaction.data === null) {
       throw new Error("No data found.");
     }
-    const decrypted = this.cryptService.decrypt(itemTransaction.data);
-    const data = this.cryptService.decode<AddMultiTradePayload>(decrypted);
-    const jobId = await this.robloxService.addMultiTrade(data);
+    const decrypted = this.cryptService.decrypt(transaction.data);
+    const data = this.cryptService.decode(decrypted);
+    const jobId = await this.robloxTradesService.startMultiTrade(data);
     if (!jobId) {
       throw new Error("Failed to add Multi-Trade.");
     }
-    itemTransaction.jobId = jobId;
-    itemTransaction.status = ItemTransactionStatus.Active;
-    await this.save(itemTransaction);
+    transaction.jobId = jobId;
+    transaction.status = ItemTransactionStatus.Active;
+    await this.save(transaction);
     this.logger.debug(
-      `Added Multi-Trade ${jobId} for Item Transaction ${itemTransaction._id}.`
+      `Added Multi-Trade ${jobId} for Item Transaction ${transaction._id}.`
     );
   }
 
-  private async save(itemTransaction: ItemTransaction) {
-    itemTransaction.updatedAt = new Date();
+  private async save(transaction: ItemTransaction) {
+    transaction.updatedAt = new Date();
     await this.collection.updateOne(
-      { _id: itemTransaction._id },
-      { $set: itemTransaction }
+      { _id: transaction._id },
+      { $set: transaction }
     );
   }
 
-  @OnEvent(MULTI_TRADE_PROCESSED_EVENT)
-  async onMultiTradeCompleted(multiTradeResult: MultiTradeResult) {
+  @OnEvent(MultiTradeProcessedEvent.EVENT)
+  async onMultiTradeCompleted({ result }: MultiTradeProcessedEvent) {
     try {
-      await this.robloxService.acknowledgeMultiTrade(multiTradeResult.id);
-      const itemTransaction = await this.collection.findOne({
-        jobId: multiTradeResult.id,
+      await this.robloxTradesService.acknowledgeMultiTrade(result.id);
+      const transaction = await this.collection.findOne({
+        jobId: result.id,
       });
-      if (!itemTransaction) {
+      if (!transaction) {
         return this.logger.warn(
-          `Item Transaction not found: Multi-Trade ${multiTradeResult.id}`
+          `Item Transaction not found: Multi-Trade ${result.id}`
         );
       }
       this.logger.debug(
-        `Item Trade ${itemTransaction._id} ${
-          multiTradeResult.status === MultiTradeStatus.Finished
-            ? "finished"
-            : "failed"
+        `Item Trade ${transaction._id} ${
+          result.status === MultiTradeStatus.Finished ? "finished" : "failed"
         }.`
       );
-      itemTransaction.status =
-        multiTradeResult.status === MultiTradeStatus.Finished
+      transaction.status =
+        result.status === MultiTradeStatus.Finished
           ? ItemTransactionStatus.Finished
           : ItemTransactionStatus.Failed;
-      await this.save(itemTransaction);
-      const event = `${ITEM_TRANSACTION_PROCESSED_EVENT}.${itemTransaction.event}`;
+      transaction.data = null;
+      await this.save(transaction);
       this.eventEmitter.emit(
-        event,
-        new ItemTransactionProcessedEvent(itemTransaction, multiTradeResult)
+        ItemTransactionProcessedEvent.getName(transaction.event),
+        new ItemTransactionProcessedEvent({ transaction, result })
       );
     } catch {
-      this.logger.debug(
-        `Failed to acknowledge Multi-Trade ${multiTradeResult.id}.`
-      );
+      this.logger.debug(`Failed to acknowledge Multi-Trade ${result.id}.`);
     }
   }
 }
 
-export interface CreateItemTransactionPayload {
+interface CreateItemTransactionPayload {
   userId: string;
-  type: ItemTransactionType;
-  event: ItemTransactionEvent;
-  sender: AddMultiTradePayload["sender"];
-  receiver: AddMultiTradePayload["receiver"];
   details?: unknown;
+}
+
+export type CreateItemTransactionUser = StartMultiTradeUser;
+
+export interface CreateDepositTransactionPayload
+  extends CreateItemTransactionPayload {
+  event: DepositItemTransaction["event"];
+  sender: StartMultiTradeUser;
+  receiver: StartMultiTradeUser;
+}
+
+export interface CreateWithdrawTransactionPayload
+  extends CreateItemTransactionPayload {
+  event: WithdrawItemTransaction["event"];
+  receiver: StartMultiTradeUser;
+  senders: StartMultiTradeUser[];
 }

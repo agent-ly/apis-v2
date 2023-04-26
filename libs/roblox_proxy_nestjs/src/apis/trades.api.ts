@@ -2,17 +2,6 @@ import { Injectable } from "@nestjs/common";
 
 import { RobloxClient } from "../roblox.client.js";
 
-export type TradeStatus =
-  | "Unknown"
-  | "Open"
-  | "Pending"
-  | "Completed"
-  | "Expired"
-  | "RejectedDueToError"
-  | "Countered"
-  | "Processing"
-  | "InterventionRequired";
-
 interface TradeUser {
   id: number;
   name: string;
@@ -29,6 +18,17 @@ interface TradeOffer {
   user: TradeUser;
   userAssets: TradeUserAsset[];
 }
+
+export type TradeStatus =
+  | "Unknown"
+  | "Open"
+  | "Pending"
+  | "Completed"
+  | "Expired"
+  | "RejectedDueToError"
+  | "Countered"
+  | "Processing"
+  | "InterventionRequired";
 
 export interface GetTradeResponse {
   id: number;

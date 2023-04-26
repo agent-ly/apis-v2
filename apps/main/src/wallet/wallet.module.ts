@@ -13,6 +13,6 @@ import { WalletController } from "./wallet.controller.js";
   ],
   providers: [WalletService],
   controllers: [WalletController],
-  exports: [WalletService],
+  exports: [TransactionsModule, WalletService],
 })
 export class WalletModule {}

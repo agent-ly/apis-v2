@@ -8,6 +8,8 @@ export class AmlError extends Error {
     }
   }
 
+  public readonly statusCode = 400;
+
   constructor() {
     super(AmlError.MESSAGE);
     this.name = "AmlError";

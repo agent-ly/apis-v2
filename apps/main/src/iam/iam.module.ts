@@ -15,6 +15,7 @@ import { OtpAuthenticationService } from "./authentication/otp_authentication.se
 import { AuthenticationService } from "./authentication/authentication.service.js";
 import { AuthenticationController } from "./authentication/authentication.controller.js";
 import { BearerTokenGuard } from "./authentication/guards/bearer_token.guard.js";
+import { IpGuard } from "./authentication/guards/ip.guard.js";
 import { AuthenticationGuard } from "./authentication/guards/authentication.guard.js";
 import { RolesGuard } from "./authorization/guards/roles.guard.js";
 
@@ -28,10 +29,11 @@ import { RolesGuard } from "./authorization/guards/roles.guard.js";
     UserSettingsModule,
   ],
   providers: [
-    { provide: HashingService, useClass: Argon2Service },
-    BearerTokenGuard,
     { provide: APP_GUARD, useClass: AuthenticationGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: HashingService, useClass: Argon2Service },
+    BearerTokenGuard,
+    IpGuard,
     UsedOtpTokensStorage,
     RefreshTokenIdsStorage,
     OtpAuthenticationService,

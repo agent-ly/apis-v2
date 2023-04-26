@@ -1,1 +1,1 @@
-export const MULTI_TRADE_PROCESSED_EVENT = "multi-trade.processed";
+export const REQUEST_ROBLOX_USER_KEY = "robloxUser";

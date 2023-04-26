@@ -13,6 +13,8 @@ export class AmountInvalidError extends Error {
     }
   }
 
+  public readonly statusCode = 400;
+
   constructor() {
     super(AmountInvalidError.MESSAGE);
     this.name = "AmountInvalidError";

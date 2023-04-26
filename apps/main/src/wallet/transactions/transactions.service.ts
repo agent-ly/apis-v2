@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectCollection } from "nestjs-super-mongodb";
 import type { Collection } from "mongodb";
-import { nanoid } from "nanoid";
 
+import { generateId } from "../../common/util/id.util.js";
 import { Transaction } from "./transaction.entity.js";
 import { COLLECTION_NAME } from "./transactions.constants.js";
 
@@ -14,7 +14,7 @@ export class TransactionsService {
   ) {}
 
   async create(payload: CreateTransactionPayload) {
-    const id = nanoid();
+    const id = generateId();
     const now = new Date();
     const transaction: Transaction = {
       _id: id,

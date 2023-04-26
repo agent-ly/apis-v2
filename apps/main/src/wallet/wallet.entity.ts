@@ -1,7 +1,6 @@
 import { Doc } from "../common/interfaces/doc.interface.js";
 
 export interface Wallet extends Doc {
-  userId: string;
   enabled: boolean;
   verified: boolean;
   balance: number;

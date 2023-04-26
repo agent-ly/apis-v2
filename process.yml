@@ -1,0 +1,7 @@
+apps:
+  - name: roblox-proxy
+    script: pnpm -F roblox-proxy start
+  - name: roblox-core
+    script: pnpm -F roblox-core start
+  - name: roblox-trades
+    script: pnpm -F roblox-trades start

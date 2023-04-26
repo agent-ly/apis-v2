@@ -27,6 +27,6 @@ export class ReauthApi {
     const url =
       "https://apis.roblox.com/reauthentication-service/v1/token/generate";
     const init = { roblosecurity, method: "POST", data };
-    return this.client.json<GenerateTokenResponse>(url, init);
+    return this.client.json(url, init);
   }
 }

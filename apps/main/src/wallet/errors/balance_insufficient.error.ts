@@ -7,6 +7,8 @@ export class BalanceInsufficientError extends Error {
     }
   }
 
+  public readonly statusCode = 400;
+
   constructor() {
     super(BalanceInsufficientError.MESSAGE);
     this.name = "InsufficientBalanceError";

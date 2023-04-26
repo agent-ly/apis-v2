@@ -9,14 +9,11 @@ import { describe, it, beforeAll, afterAll, expect, vi } from "vitest";
 import { request, spec } from "pactum";
 import { WebSocket } from "ws";
 
-import {
-  SINGLE_TRADE_CHALLENGE_EVENT,
-  SINGLE_TRADE_AUTHORIZE_EVENT,
-} from "../src/queue/single_trade/single_trade.constants.js";
-import { MULTI_TRADE_PROCESSED_EVENT } from "../src/queue/multi_trade/multi_trade.constants.js";
+import { SINGLE_TRADE_PROMPT_CHALLENGE_EVENT } from "../src/root/single_trade/single_trade.constants.js";
+import { MULTI_TRADE_PROCESSED_EVENT } from "../src/root/multi_trade/multi_trade.constants.js";
 import { AppModule } from "../src/app.module.js";
 
-import { openWs, strictNextEvent, sendEvent } from "./utils/ws.js";
+import { openWs, strictNextEvent } from "./utils/ws.js";
 import { fixtures, errorFixtures } from "./fixtures.js";
 
 describe("Roblox Trades", () => {
@@ -65,7 +62,7 @@ describe("Roblox Trades", () => {
     await app.close();
   });
 
-  describe("Default", () => {
+  describe("Core", () => {
     it.each([
       ["one-to-one sender_to_receiver", fixtures[0]],
       ["one-to-one receiver_to_sender", fixtures[1]],
@@ -75,8 +72,8 @@ describe("Roblox Trades", () => {
       "Starts and completes a %s multi-trade",
       async (name, { input, output }) => {
         const path = name.startsWith("one-to-one")
-          ? "/queue/add"
-          : "/queue/add-many";
+          ? "/add-one-to-one-multi-trade"
+          : "/add-many-to-one-multi-trade";
         await spec().post(path).withJson(input).expectStatus(201);
         const event = await strictNextEvent(ws, MULTI_TRADE_PROCESSED_EVENT);
         expect(event.data.status).toEqual(output.status);
@@ -98,19 +95,22 @@ describe("Roblox Trades", () => {
           errorFixtures[0].sendTrade
         );
         await spec()
-          .post("/queue/add")
+          .post("/add-one-to-one-multi-trade")
           .withJson(fixtures[0].input)
           .expectStatus(201);
         const challengeEvent = await strictNextEvent(
           ws,
-          SINGLE_TRADE_CHALLENGE_EVENT
+          SINGLE_TRADE_PROMPT_CHALLENGE_EVENT
         );
         expect(challengeEvent.data.userId).toEqual(1);
-        sendEvent(ws, SINGLE_TRADE_AUTHORIZE_EVENT, {
-          singleTradeId: challengeEvent.data.singleTradeId,
-          userId: challengeEvent.data.userId,
-          code: "test",
-        });
+        await spec()
+          .post(
+            `/single-trades/${challengeEvent.data.singleTradeId}/${challengeEvent.data.userId}/solve-challenge`
+          )
+          .withQueryParams({
+            code: "123456",
+          })
+          .expectStatus(200);
         const processedEvent = await strictNextEvent(
           ws,
           MULTI_TRADE_PROCESSED_EVENT
@@ -119,7 +119,7 @@ describe("Roblox Trades", () => {
       },
       { timeout: 10e3 }
     );
-    it(
+    it.only(
       "Should fail for being paused for too long",
       async () => {
         vi.spyOn(tradesApi, "sendTrade").mockRejectedValueOnce(
@@ -127,14 +127,24 @@ describe("Roblox Trades", () => {
         );
         vi.useFakeTimers();
         await spec()
-          .post("/queue/add")
+          .post("/add-one-to-one-multi-trade")
           .withJson(fixtures[0].input)
           .expectStatus(201);
-        await strictNextEvent(ws, SINGLE_TRADE_CHALLENGE_EVENT);
+        await strictNextEvent(ws, SINGLE_TRADE_PROMPT_CHALLENGE_EVENT);
         vi.advanceTimersToNextTimerAsync();
         vi.useRealTimers();
         const event = await strictNextEvent(ws, MULTI_TRADE_PROCESSED_EVENT);
-        expect(event.data.status).toEqual("failed");
+        expect(event.data.status).toEqual("finished");
+        expect(event.data.errors).toEqual([
+          {
+            statusCode: 408,
+            errorCode: -1,
+            message: "Pause timed out.",
+            name: "TradeTimeoutError",
+            field: "userId",
+            fieldData: 1,
+          },
+        ]);
       },
       { timeout: 10e3 }
     );

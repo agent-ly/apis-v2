@@ -1,6 +1,10 @@
+export type PageQuerySortOrder = "Asc" | "Desc";
+
+export type PageQueryLimit = 10 | 25 | 50 | 100;
+
 export interface PageQuery {
-  sortOrder?: string;
-  limit?: number;
+  limit?: PageQueryLimit;
+  sortOrder?: PageQuerySortOrder;
   cursor?: string;
 }
 

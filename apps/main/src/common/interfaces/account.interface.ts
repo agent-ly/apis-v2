@@ -7,6 +7,6 @@ export interface Account extends Doc<number> {
   frictioned: boolean;
   credentials: {
     roblosecurity: string;
-    totpSecret?: string;
+    roblosecret?: string;
   };
 }

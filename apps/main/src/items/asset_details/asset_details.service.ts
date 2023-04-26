@@ -1,16 +1,25 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import { RolimonsService } from "../../roblox/rolimons/rolimons.service.js";
+import { ASSET_DETAILS_UPDATED_EVENT } from "./asset_details.constants.js";
 import { AssetDetailsStorage } from "./asset_details.storage.js";
 
 @Injectable()
-export class AssetDataService {
+export class AssetDetailsService implements OnModuleInit {
+  private static readonly UPDATE_INTERVAL = 1e3 * 60 * 5;
+
   constructor(
+    private readonly eventEmitter: EventEmitter2,
     private readonly rolimonsService: RolimonsService,
     private readonly assetDetailsStorage: AssetDetailsStorage
   ) {}
 
-  async update() {
+  onModuleInit(): void {
+    this.update();
+  }
+
+  async update(): Promise<void> {
     const data = await this.rolimonsService.getItemDetails();
     if (data === null) {
       return;
@@ -33,11 +42,13 @@ export class AssetDataService {
       }
       let ignoreNewValue = false;
       if (!hasValue) {
-        let isProjected = !!details.metadata.manualProjected;
+        const isManualProjected = details.metadata.manualProjected ?? false;
+        let isProjected = isManualProjected;
         if (!isProjected) {
           // Check if rolimons has marked the item as projected
-          const isRolimonsProjected = details.metadata.rolimonsProjected;
-          isProjected = !!isRolimonsProjected;
+          const isRolimonsProjected =
+            details.metadata.rolimonsProjected ?? false;
+          isProjected = isRolimonsProjected;
           const isMarkedAsProjected = data.items[assetId][7] === 1;
           if (!isRolimonsProjected && isMarkedAsProjected) {
             details.metadata.rolimonsProjected = true;
@@ -46,22 +57,26 @@ export class AssetDataService {
             details.metadata.rolimonsProjected = false;
             isProjected = false;
           }
-        }
-        if (!isProjected) {
-          // Check if the item meets the threshold for to be automatically projected
-          const isAutoProjected = details.metadata.autoProjected;
-          isProjected = !!isAutoProjected;
-          const multiplier = oldValue <= 2.5e3 ? 1.15 : 1.25;
-          const thresholdValue = oldValue * multiplier;
-          const isValueProjected = newValue >= thresholdValue;
-          if (!isAutoProjected && isValueProjected) {
-            details.metadata.autoProjected = true;
-            isProjected = true;
-          } else if (isAutoProjected && !isValueProjected) {
-            details.metadata.autoProjected = false;
-            isProjected = false;
+          if (!isProjected) {
+            // Check if the item meets the threshold for to be automatically projected
+            // As well as if it has been lpped
+            const isAutoProjected = details.metadata.autoProjected ?? false;
+            isProjected = isAutoProjected;
+            const maxMultiplier = oldValue <= 2.5e3 ? 1.15 : 1.25;
+            const maxValue = oldValue * maxMultiplier;
+            const isValueProjected = newValue >= maxValue;
+            if (!isAutoProjected && isValueProjected) {
+              details.metadata.autoProjected = true;
+              isProjected = true;
+            } else if (isAutoProjected && !isValueProjected) {
+              details.metadata.autoProjected = false;
+              isProjected = false;
+            }
+            const minMultiplier = 0.9;
+            const minValue = oldValue * minMultiplier;
+            const isValueLpped = newValue <= minValue;
+            ignoreNewValue = isProjected || isValueLpped;
           }
-          ignoreNewValue = isProjected;
         }
         details.metadata.projected = isProjected;
       }
@@ -71,5 +86,7 @@ export class AssetDataService {
       newAssetDetails.set(assetId, details);
     }
     await this.assetDetailsStorage.update(newAssetDetails);
+    this.eventEmitter.emit(ASSET_DETAILS_UPDATED_EVENT);
+    setTimeout(() => this.update(), AssetDetailsService.UPDATE_INTERVAL);
   }
 }

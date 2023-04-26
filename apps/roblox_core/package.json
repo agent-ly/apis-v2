@@ -3,17 +3,20 @@
   "type": "module",
   "scripts": {
     "build": "swc src -d dist",
-    "dev": "swc-esm -w \"src/**/*.ts\" -E src/main.ts",
-    "start": "node dist/main.js"
+    "start": "node -r dotenv/config dist/main.js",
+    "dev": "swc-node -w \"src/**/*.ts\" -E src/main.ts"
   },
   "dependencies": {
     "@nestjs/config": "^2.3.1",
     "@nestjs/platform-fastify": "^9.3.12",
-    "@swc/esm": "workspace:^",
+    "dotenv": "^16.0.3",
     "errd": "^1.0.0",
     "node-ipinfo": "^3.4.0",
     "roblox-proxy-core": "workspace:^",
     "roblox-proxy-nestjs": "workspace:^",
     "roblox-util": "workspace:^"
+  },
+  "devDependencies": {
+    "swc-node": "workspace:^"
   }
 }

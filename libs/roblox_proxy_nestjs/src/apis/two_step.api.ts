@@ -2,51 +2,57 @@ import { Injectable } from "@nestjs/common";
 
 import { RobloxClient } from "../roblox.client.js";
 
-export type MediaType = "email" | "sms" | "authenticator";
-
-export interface Challenge {
-  id: string;
-  type: string;
-  metadata: string;
-}
+export type ActionType =
+  | "Unknown"
+  | "Login"
+  | "RobuxSpend"
+  | "ItemTrade"
+  | "Resale"
+  | "PasswordReset"
+  | "RevertAccount"
+  | "Generic"
+  | "GenericWithRecoveryCodes";
 
 export interface GetMetadataQuery {
   userId: number;
   challengeId: string;
-  actionType: string;
+  actionType: ActionType;
 }
 
 export interface GetMetadataResponse {
   twoStepVerificationEnabled: boolean;
 }
 
-export interface GetUserConfigurationParams {
-  userId: number;
-}
-
 export interface GetUserConfigurationQuery {
   challengeId: string;
-  actionType: string;
+  actionType: ActionType;
 }
 
+export type MediaType =
+  | "Email"
+  | "SMS"
+  | "Authenticator"
+  | "RecoveryCode"
+  | "SecurityKey";
+
 export interface UserConfigurationMethod {
-  mediaType: string;
+  mediaType: MediaType;
   enabled: boolean;
 }
 
 export interface GetUserConfigurationResponse {
-  primaryMediaType: string;
+  primaryMediaType: MediaType;
   methods: UserConfigurationMethod[];
 }
 
 export interface VerifyCodeParams {
   userId: number;
-  mediaType: MediaType;
+  mediaType: "email" | "sms" | "authenticator" | "recovery-codes";
 }
 
 export interface VerifyCodePayload {
   challengeId?: string;
-  actionType?: string;
+  actionType?: ActionType;
   code: string;
 }
 
@@ -56,7 +62,7 @@ export interface VerifyCodeResponse {
 
 export interface EnableConfigurationParams {
   userId: number;
-  mediaType: MediaType;
+  mediaType: "email" | "sms" | "authenticator" | "security-key";
 }
 
 export interface EnableConfigurationPayload {
@@ -65,7 +71,7 @@ export interface EnableConfigurationPayload {
 
 export interface DisableConfigurationParams {
   userId: number;
-  mediaType: MediaType;
+  mediaType: "email" | "sms" | "authenticator" | "security-key";
 }
 
 export interface EnableAuthenticatorResponse {
@@ -84,6 +90,12 @@ export interface VerifyEnableAuthenticatorResponse {
   recoveryCodes: string[];
 }
 
+export interface Challenge {
+  id: string;
+  type: string;
+  metadata: string;
+}
+
 @Injectable()
 export class TwoStepApi {
   constructor(private readonly client: RobloxClient) {}
@@ -94,7 +106,7 @@ export class TwoStepApi {
   }
 
   getConfiguration(
-    { userId }: GetUserConfigurationParams,
+    userId: number,
     { challengeId, actionType }: GetUserConfigurationQuery
   ): Promise<GetUserConfigurationResponse> {
     let url = `https://twostepverification.roblox.com/v1/users/${userId}/configuration`;

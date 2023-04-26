@@ -3,7 +3,7 @@ import { RobloxExceptionFilter } from "roblox-proxy-nestjs";
 
 import { LinkService, type LinkPayload } from "./link.service.js";
 
-@Controller("link")
+@Controller("auth/link")
 @UseFilters(RobloxExceptionFilter)
 export class LinkController {
   constructor(private readonly linkService: LinkService) {}

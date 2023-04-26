@@ -61,10 +61,10 @@ export class UserSettingsService {
       }
     );
     if (matchedCount === 0) {
-      throw new NotFoundException("User settings not found.");
+      throw new NotFoundException({ message: "User settings not found." });
     }
     if (modifiedCount === 0) {
-      throw new BadRequestException("Password not changed.");
+      throw new BadRequestException({ message: "Password not changed." });
     }
   }
 

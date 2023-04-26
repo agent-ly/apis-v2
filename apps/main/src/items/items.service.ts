@@ -1,67 +1,50 @@
-import {
-  BadRequestException,
-  Injectable,
-  type OnModuleInit,
-} from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
+import { OnEvent } from "@nestjs/event-emitter";
 
+import { sumBy } from "../common/util/array.util.js";
 import type {
   CanAuthenticatedUserTradeResponse,
   Collectible,
-} from "../roblox/roblox.interfaces.js";
-import { RobloxService } from "../roblox/roblox.service.js";
+} from "../roblox/roblox_core/roblox_core.interfaces.js";
+import { RobloxCoreService } from "../roblox/roblox_core/roblox_core.service.js";
+import { ASSET_DETAILS_UPDATED_EVENT } from "./asset_details/asset_details.constants.js";
 import { AssetDetailsStorage } from "./asset_details/asset_details.storage.js";
 import { ItemReserveType } from "./item_reserves/enums/item_reserve_type.enum.js";
 import { ItemReservesStorage } from "./item_reserves/item_reserves.storage.js";
 import { Item } from "./interfaces/item.interface.js";
 
 @Injectable()
-export class ItemsService implements OnModuleInit {
+export class ItemsService {
   static readonly SMALL_VALUE_THRESHOLD = 1_000;
 
-  // lol.
-  private assetDetails: Awaited<ReturnType<AssetDetailsStorage["select"]>> =
+  private assetDetails: Awaited<ReturnType<AssetDetailsStorage["selectAll"]>> =
     new Map();
 
   constructor(
-    private readonly robloxService: RobloxService,
     private readonly assetDetailsStorage: AssetDetailsStorage,
+    private readonly robloxCoreService: RobloxCoreService,
     private readonly itemReservesStorage: ItemReservesStorage
   ) {}
 
-  async onModuleInit() {
-    await this.loadAssetDetails();
-  }
-
-  async loadAssetDetails() {
-    const assetDetails = await this.assetDetailsStorage.selectAll();
-    this.assetDetails = assetDetails;
-  }
-
-  canUseItems(
+  async canUseItems(
     roblosecurity: string
-  ): Promise<CanAuthenticatedUserTradeResponse>;
-  canUseItems(roblosecurity: string, strict: true): Promise<undefined>;
-  async canUseItems(roblosecurity: string, strict?: true) {
-    const result = await this.robloxService.canAuthenticatedUserTrade(
-      roblosecurity
-    );
-    if (!strict) {
-      return result;
-    }
-    if (!result.ok) {
-      throw new BadRequestException({
-        error: result.error,
-        message: result.message,
-      });
-    }
+  ): Promise<CanAuthenticatedUserTradeResponse> {
+    roblosecurity = Buffer.from(roblosecurity).toString("base64");
+    return this.robloxCoreService.canAuthenticatedUserTrade(roblosecurity);
   }
 
   async prepareItems(
     userId: number,
     targetItemIds: number[],
-    smallItemId?: number
+    targetSmallItemId?: number
   ): Promise<PrepareItemsResult> {
     const collectibles = await this.getCollectibles(userId);
+    if (!collectibles) {
+      throw new BadRequestException({
+        error: "failed_to_get_items",
+        message: "Failed to get items.",
+      });
+    }
     if (collectibles.length === 0) {
       throw new BadRequestException({
         error: "no_items",
@@ -69,11 +52,11 @@ export class ItemsService implements OnModuleInit {
       });
     }
     const ignoreSet = await this.itemReservesStorage.selectAll();
-    if (smallItemId && ignoreSet.has(smallItemId)) {
+    if (targetSmallItemId && ignoreSet.has(targetSmallItemId)) {
       throw new BadRequestException({
         error: "small_unavailable",
         message: "The specified small is unavailable.",
-        details: { itemId: smallItemId },
+        details: { itemId: targetSmallItemId },
       });
     }
     const unavailableItemIds = targetItemIds.filter((itemId) =>
@@ -88,25 +71,25 @@ export class ItemsService implements OnModuleInit {
     }
     const includeSet = new Set(targetItemIds);
     let small: Collectible | undefined;
-    if (smallItemId) {
+    if (targetSmallItemId) {
       small = collectibles.find(
-        (collectible) => collectible.userAssetId === smallItemId
+        (collectible) => collectible.userAssetId === targetSmallItemId
       );
       if (!small) {
         throw new BadRequestException({
           error: "small_not_found",
           message: "The specified small could not be found.",
-          details: { itemId: smallItemId },
+          details: { itemId: targetSmallItemId },
         });
       }
-      ignoreSet.add(smallItemId);
+      ignoreSet.add(targetSmallItemId);
     }
     const items = this.toItems(
       userId,
       collectibles,
-      true,
       ignoreSet,
-      includeSet
+      includeSet,
+      true
     );
     const missingItemIds = targetItemIds.filter(
       (itemId) => !ignoreSet.has(itemId)
@@ -119,37 +102,17 @@ export class ItemsService implements OnModuleInit {
       });
     }
     if (!small) {
-      small = this.getSmall(collectibles, ignoreSet);
-      if (!small) {
+      const smalls = this.toSmalls(collectibles, ignoreSet);
+      if (smalls.length === 0) {
         throw new BadRequestException({
           error: "no_small",
           message: "You have no smalls to trade.",
         });
       }
+      small = smalls[0];
     }
-    const value = items.reduce((sum, item) => sum + item.value, 0);
+    const value = sumBy(items, "value");
     return { value, items, small };
-  }
-
-  prepareSmall(userId: number): Promise<Collectible | undefined>;
-  prepareSmall(userId: number, strict: true): Promise<Collectible>;
-  prepareSmall(
-    userId: number,
-    strict?: boolean
-  ): Promise<Collectible | undefined>;
-  async prepareSmall(
-    userId: number,
-    strict?: boolean
-  ): Promise<Collectible | undefined> {
-    const smalls = await this.getSmalls(userId);
-    const small = smalls[0];
-    if (strict && !small) {
-      throw new BadRequestException({
-        error: "no_small",
-        message: "You have no smalls to trade.",
-      });
-    }
-    return small;
   }
 
   async getItems(
@@ -157,63 +120,85 @@ export class ItemsService implements OnModuleInit {
     strict?: boolean,
     targetItemIds?: number[]
   ): Promise<Item[]> {
-    const collectibles = await this.getCollectibles(userId, strict);
+    const collectibles = await this.getCollectibles(userId);
+    if (!collectibles) {
+      return [];
+    }
     const ignoreSet = await this.itemReservesStorage.selectAll();
     const includeSet = targetItemIds && new Set(targetItemIds);
     const items = this.toItems(
       userId,
       collectibles,
-      strict,
       ignoreSet,
-      includeSet
+      includeSet,
+      strict
     );
     return items;
   }
 
-  async getSmalls(userId: number, strict?: boolean): Promise<Collectible[]> {
-    const collectibles = await this.getCollectibles(userId, strict);
+  async prepareSmall(
+    userId: number,
+    targetSmallItemId?: number
+  ): Promise<Collectible> {
+    const targetItemIds = targetSmallItemId ? [targetSmallItemId] : undefined;
+    const smalls = await this.getSmalls(userId, targetItemIds);
+    if (smalls.length === 0) {
+      throw new BadRequestException({
+        error: targetSmallItemId ? "small_not_found" : "no_small",
+        message: targetSmallItemId
+          ? "The specified small could not be found."
+          : "You have no smalls to trade.",
+      });
+    }
+    return smalls[0];
+  }
+
+  async getSmalls(
+    userId: number,
+    targetItemIds?: number[]
+  ): Promise<Collectible[]> {
+    const collectibles = await this.getCollectibles(userId);
+    if (!collectibles) {
+      return [];
+    }
     const ignoreSet = await this.itemReservesStorage.select(
       ItemReserveType.Smalls
     );
-    const smalls = this.toSmalls(collectibles, ignoreSet);
+    const includeSet = targetItemIds && new Set(targetItemIds);
+    const smalls = this.toSmalls(collectibles, ignoreSet, includeSet);
     return smalls;
   }
 
   async getCollectibles(
     userId: number,
-    strict?: boolean
-  ): Promise<Collectible[]> {
-    const response = await this.robloxService.getUserCollectibles(userId);
+    cursor?: string
+  ): Promise<undefined | Collectible[]> {
+    const response = await this.robloxCoreService.getUserCollectibles(
+      userId,
+      cursor
+    );
     if (response.ok === false) {
-      throw new BadRequestException({
-        error: "collectibles_unavailable",
-        message: "Failed to fetch collectibles.",
-      });
+      return undefined;
     }
-    const collectibles = response.data;
-    if (strict && collectibles.length === 0) {
-      throw new BadRequestException({
-        error: "no_collectibles",
-        message: "You have no collectibles.",
-      });
+    if (response.data.nextPageCursor) {
+      const moreData = await this.getCollectibles(
+        userId,
+        response.data.nextPageCursor
+      );
+      if (moreData === undefined) {
+        return undefined;
+      }
+      response.data.data.push(...moreData);
     }
-    return collectibles;
-  }
-
-  private getSmall(
-    collectibles: Collectible[],
-    ignoreSet?: Set<number>
-  ): Collectible | undefined {
-    const smalls = this.toSmalls(collectibles, ignoreSet);
-    return smalls[0];
+    return response.data.data;
   }
 
   private toItems(
     userId: number,
     collectibles: Collectible[],
-    strict?: boolean,
     ignoreSet?: Set<number>,
-    includeSet?: Set<number>
+    includeSet?: Set<number>,
+    strict?: boolean
   ): Item[] {
     const isTargeted = ignoreSet || includeSet ? true : false;
     const items = collectibles.flatMap((collectible) => {
@@ -243,7 +228,7 @@ export class ItemsService implements OnModuleInit {
       if (!details) {
         if (strict) {
           throw new BadRequestException({
-            error: "no_data",
+            error: "no_item_data",
             message: `No data found for ${collectible.name}.`,
             details: {
               assetId: collectible.assetId,
@@ -254,7 +239,7 @@ export class ItemsService implements OnModuleInit {
         return [];
       }
       if (details.metadata.projected) {
-        if (isTargeted && strict) {
+        if (strict && isTargeted) {
           throw new BadRequestException({
             error: "item_projected",
             message: `${collectible.name} is projected.`,
@@ -289,14 +274,18 @@ export class ItemsService implements OnModuleInit {
 
   private toSmalls(
     collectibles: Collectible[],
-    ignoreSet?: Set<number>
+    ignoreSet?: Set<number>,
+    includeSet?: Set<number>
   ): Collectible[] {
     const smalls = collectibles
-      .filter(({ assetId }) => {
-        if (ignoreSet?.has(assetId)) {
+      .filter((collectible) => {
+        if (ignoreSet?.has(collectible.userAssetId)) {
           return false;
         }
-        const details = this.assetDetails.get(assetId);
+        if (includeSet && !includeSet.has(collectible.userAssetId)) {
+          return false;
+        }
+        const details = this.assetDetails.get(collectible.assetId);
         if (!details) {
           return false;
         }
@@ -305,6 +294,11 @@ export class ItemsService implements OnModuleInit {
       })
       .sort(({ recentAveragePrice: a }, { recentAveragePrice: b }) => a - b);
     return smalls;
+  }
+
+  @OnEvent(ASSET_DETAILS_UPDATED_EVENT)
+  async onAssetDetailsUpdated() {
+    this.assetDetails = await this.assetDetailsStorage.selectAll();
   }
 }
 

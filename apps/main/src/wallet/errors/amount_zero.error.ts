@@ -7,6 +7,8 @@ export class AmountZeroError extends Error {
     }
   }
 
+  public readonly statusCode = 400;
+
   constructor() {
     super(AmountZeroError.MESSAGE);
     this.name = "AmountZeroError";

@@ -4,10 +4,9 @@ import { WsAdapter } from "@nestjs/platform-ws";
 
 import { AppModule } from "./app.module.js";
 
+process.env.WORKER = "true";
 const app = await NestFactory.create(AppModule, new FastifyAdapter());
-
 app.useWebSocketAdapter(new WsAdapter(app));
-
 await app.listen(8072);
 
 console.log("💸 Server started on port 8072");

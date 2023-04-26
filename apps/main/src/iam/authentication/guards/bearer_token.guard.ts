@@ -20,12 +20,14 @@ export class BearerTokenGuard implements CanActivate {
       throw new UnauthorizedException();
     }
     try {
-      const data = await this.jwtService.verifyAsync(token);
-      (request as FastifyRequest & { [REQUEST_USER_KEY]: string })[
+      const data = await this.jwtService.verifyAsync(token, {
+        ignoreExpiration: true,
+      });
+      (request as FastifyRequest & { [REQUEST_USER_KEY]: unknown })[
         REQUEST_USER_KEY
       ] = data;
     } catch (error) {
-      new UnauthorizedException();
+      throw new UnauthorizedException();
     }
     return true;
   }

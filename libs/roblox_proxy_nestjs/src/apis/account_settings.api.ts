@@ -1,3 +1,4 @@
+import { Injectable } from "@nestjs/common";
 import { RobloxClient } from "../roblox.client.js";
 
 interface GetInventoryPrivacyResponse {
@@ -26,6 +27,7 @@ interface GetTradePrivacyResponse {
     | "All";
 }
 
+@Injectable()
 export class AccountSettingsApi {
   constructor(private readonly client: RobloxClient) {}
 
@@ -34,18 +36,18 @@ export class AccountSettingsApi {
   ): Promise<GetInventoryPrivacyResponse> {
     const url = "https://accountsettings.roblox.com/v1/inventory-privacy";
     const init = { roblosecurity };
-    return this.client.json<GetInventoryPrivacyResponse>(url, init);
+    return this.client.json(url, init);
   }
 
   getTradeValue(roblosecurity: string): Promise<GetTradeValueResponse> {
     const url = "https://accountsettings.roblox.com/v1/trade-value";
     const init = { roblosecurity };
-    return this.client.json<GetTradeValueResponse>(url, init);
+    return this.client.json(url, init);
   }
 
   getTradePrivacy(roblosecurity: string): Promise<GetTradePrivacyResponse> {
     const url = "https://accountsettings.roblox.com/v1/trade-privacy";
     const init = { roblosecurity };
-    return this.client.json<GetTradePrivacyResponse>(url, init);
+    return this.client.json(url, init);
   }
 }

@@ -21,10 +21,3 @@ export const strictNextEvent = async (ws: WebSocket, event: string) => {
   }
   return next;
 };
-
-export const sendEvent = (ws: WebSocket, event: string, data: any) => {
-  if (ws.readyState !== WebSocket.OPEN) {
-    throw new Error("WebSocket is not open");
-  }
-  ws.send(JSON.stringify({ event, data }));
-};

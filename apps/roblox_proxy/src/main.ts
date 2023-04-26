@@ -1,18 +1,16 @@
 import { nhttp } from "nhttp-land";
 
 import { logger } from "./logger.js";
+import { isPayloadMethod, removeHeaders } from "./common_util.js";
 import { resolveProxyAgent } from "./proxy_util.js";
-import {
-  getRequestUrl,
-  isPayloadMethod,
-  removeHeaders,
-} from "./request_util.js";
+import { getRequestUrl } from "./request_util.js";
 import {
   createUpstreamContext,
   finalizeUpstreamContext,
   fromUpstream,
   prepareUpstream,
 } from "./upstream_util.js";
+import kleur from "kleur";
 
 const app = nhttp();
 
@@ -34,6 +32,7 @@ app.any("/", async ({ request }) => {
   const requestHeaders = request.headers;
   removeHeaders(requestHeaders, ignoredRequestHeaders);
 
+  let startedAt = Date.now();
   let requestId = requestHeaders.get("x-request-id") ?? "default";
   if (requestId === "default" && isPayloadMethod(requestMethod)) {
     requestId += `_${payloadRequestIds++}`;
@@ -49,10 +48,10 @@ app.any("/", async ({ request }) => {
   finalizeUpstreamContext(context, requestId, agent);
   await prepareUpstream(request, context);
   const response = await fromUpstream(context);
+  const duration = Date.now() - startedAt;
   logger[response.status >= 400 ? "error" : "log"](
-    `[request-${requestId}] ${response.status} ${response.statusText}`
+    `[request-${requestId}] ${response.status} ${response.statusText} (${duration}ms)`
   );
-
   return response;
 });
 

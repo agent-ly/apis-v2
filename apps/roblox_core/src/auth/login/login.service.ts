@@ -248,9 +248,7 @@ export class LoginService {
   }
 
   private async getProofOfWorkPuzzle(sessionId: string) {
-    const puzzle = await this.proofOfWorkApi.getPuzzle({
-      sessionID: sessionId,
-    });
+    const puzzle = await this.proofOfWorkApi.getPuzzle(sessionId);
     return puzzle;
   }
 

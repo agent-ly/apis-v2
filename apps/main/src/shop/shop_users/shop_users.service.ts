@@ -3,6 +3,7 @@ import type { Collection } from "mongodb";
 
 import { ShopUser } from "./shop_user.entity.js";
 import { COLLECTION_NAME } from "./shop_users.constants.js";
+import { ShopUserType } from "./enums/shop_user_type.enum.js";
 
 // TODO: Scan for users that have not been authenticated in a while
 
@@ -12,31 +13,37 @@ export class ShopUsersService {
     private readonly collection: Collection<ShopUser>
   ) {}
 
-  async create(payload: CreateShopUserPayload): Promise<void> {
+  onModuleInit() {
+    this.collection.createIndexes([{ key: { _id: 1, type: 1 } }]);
+  }
+
+  async create(payload: CreateOrUpsertShopUserPayload): Promise<void> {
     const now = new Date();
-    const shopUser: ShopUser = {
+    const user: ShopUser = {
       _id: payload.userId,
+      type: payload.type,
       enabled: true,
       authenticated: true,
       moderated: false,
       frictioned: false,
       credentials: {
         roblosecurity: payload.roblosecurity,
-        totpSecret: payload.totpSecret,
+        roblosecret: payload.roblosecret,
       },
       updatedAt: now,
       createdAt: now,
     };
-    await this.collection.insertOne(shopUser);
+    await this.collection.insertOne(user);
   }
 
-  async createOrUpdate(payload: CreateShopUserPayload): Promise<void> {
-    const user = await this.findById(payload.userId);
+  async upsert(payload: CreateOrUpsertShopUserPayload): Promise<void> {
+    const user = await this.findByIdAndType(payload.type, payload.userId);
     if (!user) {
       await this.create({
+        type: payload.type,
         userId: payload.userId,
         roblosecurity: payload.roblosecurity,
-        totpSecret: payload.totpSecret,
+        roblosecret: payload.roblosecret,
       });
     } else {
       if (user.authenticated !== true) {
@@ -49,27 +56,45 @@ export class ShopUsersService {
         user.credentials.roblosecurity = payload.roblosecurity;
       }
       if (
-        payload.totpSecret &&
-        user.credentials.totpSecret !== payload.totpSecret
+        payload.roblosecret &&
+        user.credentials.roblosecret !== payload.roblosecret
       ) {
-        user.credentials.totpSecret = payload.totpSecret;
+        user.credentials.roblosecret = payload.roblosecret;
       }
-      await this.save(user);
+      await this.collection.updateOne(
+        { _id: user._id },
+        {
+          $set: {
+            authenticated: user.authenticated,
+            moderated: user.moderated,
+            ["credentials.roblosecurity"]: user.credentials.roblosecurity,
+            ["credentials.roblosecret"]: user.credentials.roblosecret,
+          },
+          $currentDate: { updatedAt: true },
+        }
+      );
     }
   }
 
-  async save(shopUser: ShopUser): Promise<void> {
-    shopUser.updatedAt = new Date();
-    await this.collection.updateOne({ _id: shopUser._id }, { $set: shopUser });
+  async save(user: ShopUser): Promise<void> {
+    user.updatedAt = new Date();
+    await this.collection.updateOne({ _id: user._id }, { $set: user });
   }
 
-  findById(id: number): Promise<ShopUser | null> {
-    return this.collection.findOne({ _id: id });
+  findByIdAndType(
+    type: ShopUserType,
+    userId: number
+  ): Promise<ShopUser | null> {
+    return this.collection.findOne({
+      _id: userId,
+      type,
+    });
   }
 }
 
-interface CreateShopUserPayload {
+interface CreateOrUpsertShopUserPayload {
+  type: ShopUserType;
   userId: number;
   roblosecurity: string;
-  totpSecret?: string;
+  roblosecret?: string;
 }

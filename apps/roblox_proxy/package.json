@@ -3,16 +3,18 @@
   "type": "module",
   "scripts": {
     "build": "swc src -d dist",
-    "dev": "swc-esm -w \"src/**/*.ts\" -E src/main.ts",
-    "start": "node -r dotenv/config dist/main.js"
+    "start": "node -r dotenv/config dist/main.js",
+    "dev": "swc-node -w \"src/**/*.ts\" -E src/main.ts"
   },
   "dependencies": {
-    "@swc/esm": "workspace:^",
     "dotenv": "^16.0.3",
     "https-proxy-agent": "^5.0.1",
     "kleur": "^4.1.5",
     "nhttp-land": "^1.2.10",
     "node-fetch": "^3.3.1",
     "roblox-proxy-core": "workspace:^"
+  },
+  "devDependencies": {
+    "swc-node": "workspace:^"
   }
 }

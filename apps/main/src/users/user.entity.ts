@@ -11,8 +11,8 @@ export interface User extends Doc {
   level: number;
   role: UserRole;
   stats: Partial<UserStats>;
-  badges: Partial<Record<UserBadge, Date>>;
-  tags: Partial<Record<UserTag, UserTagEntry>>;
+  badges: Partial<Record<UserBadge, UserBadgeData>>;
+  tags: Partial<Record<UserTag, UserTagData>>;
   lastLoginAt: Date | null;
 }
 
@@ -23,7 +23,11 @@ interface UserStats {
   profited: Partial<Record<WagerCurrency, number>>;
 }
 
-interface UserTagEntry {
+interface UserBadgeData {
+  issuedAt: Date;
+}
+
+interface UserTagData {
   issuerId: string;
   issuedAt: Date;
   expiresAt: Date;

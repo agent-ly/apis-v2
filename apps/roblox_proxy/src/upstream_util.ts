@@ -6,11 +6,19 @@ import nodeFetch, {
 } from "node-fetch";
 
 import { logger } from "./logger.js";
-import { isPayloadMethod } from "./request_util.js";
+import { isPayloadMethod, removeHeaders } from "./common_util.js";
 
 const REQUEST_TIMEOUT = 2e4;
 
 const csrfTokens = new Map<string, string>();
+
+const ignoredResponseHeaders = new Set([
+  "content-length",
+  "content-encoding",
+  "transfer-encoding",
+  "connection",
+  "keep-alive",
+]);
 
 interface UpstreamContext {
   url: string;
@@ -53,8 +61,9 @@ export const fromUpstream = async (
 ): Promise<Response> => {
   const response = await fetchUpstream(context);
   const status = response.status,
-    statusText = response.statusText,
-    headers = response.headers;
+    statusText = response.statusText;
+  const headers = new Headers(response.headers);
+  removeHeaders(headers, ignoredResponseHeaders);
   const body = response.body ? await response.blob() : undefined;
   return new Response(body, { status, statusText, headers });
 };

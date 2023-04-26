@@ -13,38 +13,33 @@ export class CryptService {
 
   encrypt(data: string): string {
     const iv = randomBytes(16);
-    const cipher = createCipheriv(
-      this.config.algorithm,
-      this.config.secret,
-      iv
-    );
+    const cipher = createCipheriv("aes-256-gcm", this.config.secret, iv);
     const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
-    return `${iv.toString("base64")}.${encrypted.toString("base64")}`;
+    const tag = cipher.getAuthTag();
+    return `${tag.toString("base64")}.${iv.toString(
+      "base64"
+    )}.${encrypted.toString("base64")}`;
   }
 
-  decrypt(encrypted: string): string {
-    const [iv, data] = encrypted.split(".");
+  decrypt(data: string): string {
+    const [tag, iv, encrypted] = data.split(".");
     const decipher = createDecipheriv(
-      this.config.algorithm,
+      "aes-256-gcm",
       this.config.secret,
       Buffer.from(iv, "base64")
     );
-    const decrypted = Buffer.concat([
-      decipher.update(Buffer.from(data, "base64")),
+    decipher.setAuthTag(Buffer.from(tag, "base64"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(encrypted, "base64")),
       decipher.final(),
-    ]);
-    return decrypted.toString();
+    ]).toString();
   }
 
-  encode(data: Record<string, any>): string {
-    const stringified = JSON.stringify(data);
-    const encoded = Buffer.from(stringified).toString("base64");
-    return encoded;
+  encode(data: any): string {
+    return Buffer.from(JSON.stringify(data)).toString("base64");
   }
 
-  decode<TParsed extends Record<string, any>>(encoded: string): TParsed {
-    const decoded = Buffer.from(encoded, "base64").toString("utf8");
-    const parsed = JSON.parse(decoded);
-    return parsed;
+  decode(data: string): any {
+    return JSON.parse(Buffer.from(data, "base64").toString());
   }
 }

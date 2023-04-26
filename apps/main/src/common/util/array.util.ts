@@ -20,39 +20,37 @@ export const pickBy = <T extends Record<string, any>, K extends keyof T>(
   key: K
 ): T[K][] => array.map((item) => item[key]);
 
-export const pickByPredicate = <T extends Record<string, any>, U>(
-  array: T[],
-  predicate: (item: T) => U
-): U[] => array.map(predicate);
-
 export const groupBy = <T extends Record<string, any>, K extends keyof T>(
   array: T[],
   key: K
-): Map<T[K], T[]> =>
-  array.reduce((groups, item) => {
+): Map<T[K], T> =>
+  array.reduce((map, item) => {
     const value = item[key];
-    let group = groups.get(value);
-    if (!group) {
-      group = [value];
-    } else {
-      group.push(value);
+    if (value === undefined || value === null) {
+      return map;
     }
-    groups.set(value, group);
-    return groups;
+    if (map.has(value)) {
+      return map;
+    }
+    map.set(value, item);
+    return map;
   }, new Map());
 
-export const groupByPredicate = <T extends Record<string, any>, U>(
+export const groupAllBy = <T extends Record<string, any>, K extends keyof T>(
   array: T[],
-  predicate: (item: T) => U
-): Map<U, T[]> =>
-  array.reduce((groups, item) => {
-    const value = predicate(item);
-    let group = groups.get(value);
-    if (!group) {
-      group = [value];
-    } else {
-      group.push(value);
+  key: K
+): Map<T[K], T[]> =>
+  array.reduce((map, item) => {
+    const value = item[key];
+    if (value === undefined || value === null) {
+      return map;
     }
-    groups.set(value, group);
-    return groups;
+    let group = map.get(value);
+    if (!group) {
+      group = [item];
+    } else {
+      group.push(item);
+    }
+    map.set(value, group);
+    return map;
   }, new Map());

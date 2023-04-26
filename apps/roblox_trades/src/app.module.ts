@@ -5,7 +5,7 @@ import { MongoModule } from "nestjs-super-mongodb";
 import { RobloxModule } from "roblox-proxy-nestjs";
 
 import dbConfig from "./config/db.config.js";
-import { QueueModule } from "./queue/queue.module.js";
+import { RootModule } from "./root/root.module.js";
 
 @Module({
   imports: [
@@ -13,7 +13,7 @@ import { QueueModule } from "./queue/queue.module.js";
     EventEmitterModule.forRoot(),
     MongoModule.forRootAsync(dbConfig.asProvider()),
     RobloxModule,
-    QueueModule,
+    RootModule,
   ],
 })
 export class AppModule {}

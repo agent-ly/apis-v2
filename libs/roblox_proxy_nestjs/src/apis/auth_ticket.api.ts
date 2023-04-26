@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { RequestOptions } from "roblox-proxy-core/client";
+import type { RequestConfig } from "roblox-proxy-core/types";
 
 import { RobloxClient } from "../roblox.client.js";
 
@@ -9,7 +9,7 @@ export class AuthTicketApi {
 
   async createTicket(
     roblosecurity: string,
-    config?: RequestOptions["config"]
+    config?: RequestConfig
   ): Promise<string | null> {
     const url = "https://auth.roblox.com/v1/authentication-ticket";
     const init = { roblosecurity, method: "POST" };
@@ -19,7 +19,7 @@ export class AuthTicketApi {
 
   async redeemTicket(
     ticket: string,
-    config?: RequestOptions["config"]
+    config?: RequestConfig
   ): Promise<string | null> {
     const url = "https://auth.roblox.com/v1/authentication-ticket/redeem";
     const headers = { RBXAuthenticationNegotiation: "https://roblox.com" };

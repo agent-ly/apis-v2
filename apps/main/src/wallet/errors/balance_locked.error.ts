@@ -6,6 +6,7 @@ export class BalanceLockedError extends Error {
       throw new BalanceLockedError();
     }
   }
+  public readonly statusCode = 400;
 
   constructor() {
     super(BalanceLockedError.MESSAGE);

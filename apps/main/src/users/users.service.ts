@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   type OnModuleInit,
@@ -6,8 +7,8 @@ import {
 import { EventEmitter2, OnEvent } from "@nestjs/event-emitter";
 import { InjectCollection } from "nestjs-super-mongodb";
 import type { Collection, Filter, UpdateFilter } from "mongodb";
-import { nanoid } from "nanoid";
 
+import { generateId } from "../common/util/id.util.js";
 import { WagerStatus } from "../wagers/enums/wager_status.enum.js";
 import { WagerResult } from "../wagers/enums/wager_result.enum.js";
 import type { Wager } from "../wagers/wager.entity.js";
@@ -41,7 +42,7 @@ export class UsersService implements OnModuleInit {
   }
 
   async insert(name: string) {
-    const id = nanoid();
+    const id = generateId();
     const now = new Date();
     const user: User = {
       _id: id,
@@ -95,58 +96,53 @@ export class UsersService implements OnModuleInit {
     const entry = { issuerId, issuedAt, expiresAt };
     const { matchedCount, modifiedCount } = await this.collection.updateOne(
       { _id: userId },
-      { $set: { [`tags.${tag}`]: entry } }
+      {
+        $set: { [`tags.${tag}`]: entry },
+        $currentDate: { updatedAt: true },
+      }
     );
     if (matchedCount === 0) {
-      throw new NotFoundException("User not found.");
+      throw new NotFoundException({ message: "User not found." });
     }
     if (modifiedCount === 0) {
-      throw new Error("Failed to add tag.");
+      throw new BadRequestException({ message: "Failed to add tag." });
     }
   }
 
   async removeTag(userId: string, tag: UserTag) {
     const { matchedCount, modifiedCount } = await this.collection.updateOne(
       { _id: userId },
-      { $unset: { [`tags.${tag}`]: true } }
+      {
+        $unset: { [`tags.${tag}`]: true },
+        $currentDate: { updatedAt: true },
+      }
     );
     if (matchedCount === 0) {
-      throw new NotFoundException("User not found.");
+      throw new NotFoundException({ message: "User not found." });
     }
     if (modifiedCount === 0) {
-      throw new Error("Failed to remove tag.");
+      throw new BadRequestException({ message: "Failed to remove tag." });
     }
   }
 
   async awardBadges(userId: string, badges: UserBadge[]) {
+    const now = new Date();
     const entries = badges.reduce(
       (acc, badge) => ({
         ...acc,
-        [`badges.${badge}`]: new Date(),
+        [`badges.${badge}`]: { issuedAt: now },
       }),
       {}
     );
-    await this.collection.updateOne({ _id: userId }, { $set: entries });
+    await this.collection.updateOne(
+      { _id: userId },
+      { $set: entries, $currentDate: { updatedAt: true } }
+    );
   }
 
+  @OnEvent(WAGER_CREATED_EVENT)
+  @OnEvent(WAGER_CANCELLED_EVENT)
   @OnEvent(WAGER_COMPLETED_EVENT)
-  async onWagerCompleted(wager: Wager) {
-    const user = await this.findById(wager.userId);
-    if (!user) {
-      return;
-    }
-    const badges: UserBadge[] = [];
-    for (const [amount, badge] of UsersService.WAGER_AMOUNT_BADGES.entries()) {
-      if (wager.amount >= amount && !user.badges[badge]) {
-        badges.push(badge);
-      }
-    }
-    if (badges.length > 0) {
-      await this.awardBadges(user._id, badges);
-    }
-  }
-
-  @OnEvent([WAGER_CREATED_EVENT, WAGER_CANCELLED_EVENT, WAGER_COMPLETED_EVENT])
   async onWagerUpdated(wager: Wager) {
     const filter: Filter<User> = { _id: wager.userId };
     const update: UpdateFilter<User> = {};
@@ -170,5 +166,22 @@ export class UsersService implements OnModuleInit {
         break;
     }
     await this.collection.updateOne(filter, update);
+  }
+
+  @OnEvent(WAGER_COMPLETED_EVENT)
+  async onWagerCompleted(wager: Wager) {
+    const user = await this.findById(wager.userId);
+    if (!user) {
+      return;
+    }
+    const badges: UserBadge[] = [];
+    for (const [amount, badge] of UsersService.WAGER_AMOUNT_BADGES.entries()) {
+      if (wager.amount >= amount && !user.badges[badge]) {
+        badges.push(badge);
+      }
+    }
+    if (badges.length > 0) {
+      await this.awardBadges(user._id, badges);
+    }
   }
 }
