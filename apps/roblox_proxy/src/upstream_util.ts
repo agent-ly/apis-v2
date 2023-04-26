@@ -118,8 +118,9 @@ const fetchUpstream = async (
 const fetchWithTimeout = async (
   url: string,
   init: NodeFetchRequestInit,
-  timeout = REQUEST_TIMEOUT
-) => {
+  timeout = REQUEST_TIMEOUT,
+  retries = 0
+): Promise<NodeFetchResponse> => {
   const controller = new AbortController();
   init.signal = controller.signal;
   const timeoutId = setTimeout(() => {
@@ -131,12 +132,16 @@ const fetchWithTimeout = async (
     return response;
   } catch (error) {
     if (error instanceof FetchError) {
-      console.dir({
-        type: error.type,
-        code: error.code,
-        errno: error.errno,
-        message: error.message,
-      });
+      if (retries > 3) {
+        logger.error(
+          `[fetch] Fetch error: ${error.type ?? "no_type"} ${
+            error.code ?? "no_code"
+          } ${error.errno ?? "no_errno"} ${error.message ?? "no_message"}`
+        );
+        throw error;
+      }
+      logger.debug(`[fetch] Retrying request: ${url}`);
+      return fetchWithTimeout(url, init, timeout, retries + 1);
     }
     throw error;
   } finally {
