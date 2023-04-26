@@ -1,10 +1,9 @@
-import type { HttpsProxyAgent } from "https-proxy-agent";
+import createHttpsProxyAgent, { HttpsProxyAgent } from "https-proxy-agent";
 import nodeFetch, {
   BodyInit as NodeFetchBodyInit,
   RequestInit as NodeFetchRequestInit,
   Response as NodeFetchResponse,
   FetchError,
-  AbortError,
 } from "node-fetch";
 
 import { logger } from "./logger.js";
