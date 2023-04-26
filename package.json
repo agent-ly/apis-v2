@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "build": "turbo run build",
     "format:eslint": "eslint --fix --ext .ts,.js .",
     "format:prettier": "prettier --write **/*.{ts,js,json}",
     "format": "pnpm  format:eslint && pnpm  format:prettier",
